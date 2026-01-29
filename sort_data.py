@@ -53,31 +53,31 @@ def which_set(filename, validation_percentage, testing_percentage):
     return result
 
 def main():
-    total_pos = 0
-    total_neg = 0
     dirs = [p for p in Path("./speech-data").iterdir() if p.is_dir()]
-    with (open("training_set.txt", "w") as tra_f,
-          open("validation_set.txt", "w") as val_f,
-          open("testing_set.txt", "w") as tes_f,
-          open("stop_set.txt", "w") as stop_f):
+    with (open("train_pos_set.txt", "w") as tra_pos_f,
+          open("train_neg_set.txt", "w") as tra_neg_f,
+          open("val_pos_set.txt", "w") as val_pos_f,
+          open("val_neg_set.txt", "w") as val_neg_f,
+          open("test_pos_set.txt", "w") as tes_pos_f,
+          open("test_neg_set.txt", "w") as tes_neg_f):
         for dir_ in dirs:
             for p in dir_.iterdir():
                 if not p.name.endswith(".wav"): continue
-                set_choice = which_set(p.name, 15, 15)
+                set_choice = which_set(p.name, 20, 0)
                 if dir_.name.startswith("stop"):
-                    if set_choice != "training":
-                        stop_f.write(f"{dir_.name}/{p.name}\n")
-                    total_pos += 1
+                    if set_choice == "validation":
+                        val_pos_f.write(f"{dir_.name}/{p.name}\n")
+                    elif set_choice == "testing":
+                        tes_pos_f.write(f"{dir_.name}/{p.name}\n")
+                    if set_choice == "training":
+                        tra_pos_f.write(f"{dir_.name}/{p.name}\n")
                 else:
-                   total_neg += 1
-                if set_choice == "validation":
-                    val_f.write(f"{dir_.name}/{p.name}\n")
-                elif set_choice == "testing":
-                    tes_f.write(f"{dir_.name}/{p.name}\n")
-                if set_choice == "training":
-                    tra_f.write(f"{dir_.name}/{p.name}\n")
-    print(f"Total Positive: {total_pos}\nTotal Negative: {total_neg}\nRatio: {total_neg/total_pos}")
-    return total_neg / total_pos
+                    if set_choice == "validation":
+                        val_neg_f.write(f"{dir_.name}/{p.name}\n")
+                    elif set_choice == "testing":
+                        tes_neg_f.write(f"{dir_.name}/{p.name}\n")
+                    if set_choice == "training":
+                        tra_neg_f.write(f"{dir_.name}/{p.name}\n")
 
 if __name__ == "__main__":
    main()

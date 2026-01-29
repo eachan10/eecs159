@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.fft import dct
+from scipy.signal import resample_poly
 import matplotlib.pyplot as plt
 
 import cmsisdsp
@@ -37,7 +38,7 @@ for j in range(BINS):
 # audio recorded as 16kHz
 # pre-emphasis
 def pre_emphasis(signal: np.ndarray):
-    COEF = 0.97   # usual range from 0.95 to 0.97
+    COEF = 0.95   # usual range from 0.95 to 0.97
     return np.append(signal[0], signal[1:] - COEF * signal[:-1])
 
 def power_spectrum(signal: np.ndarray):
@@ -64,7 +65,12 @@ def mfcc(signal):
     energies = filterbank(signal)
     features = dct(energies, type=2, axis=0, norm='ortho')
     # return features # only need the lower 12 for audio speech recognition
-    return features[:12] # only need the lower 12 for audio speech recognition
+
+    # apply cepstral lifter
+    L = 22.0
+    n = np.arange(12)
+    lift = 1 + L/2 * np.sin(np.pi*n/L)
+    return features[:12] * lift # only need the lower 12 for audio speech recognition
 
 hamming = 0.54 - 0.46 * np.cos(2*np.pi*np.arange(0,400)/(400-1))
 # the number of frames is the len of this range
@@ -72,11 +78,12 @@ hamming = 0.54 - 0.46 * np.cos(2*np.pi*np.arange(0,400)/(400-1))
 # 400 is the length of one frame
 # 300 is the step size between frames
 frames = len(range(0, 16000 - 400, 300))
-def load_wav(path):
+def load_wav(path, downsample=False):
     with wave.open(path) as wf:
         n_frames = wf.getnframes()
         sampwidth = wf.getsampwidth()
         audio_bytes = wf.readframes(n_frames)
+        framerate = wf.getframerate()
     
     if sampwidth == 2:
         dtype = np.int16
@@ -85,9 +92,12 @@ def load_wav(path):
     else:
         raise RuntimeError()
     audio = np.frombuffer(audio_bytes, dtype=dtype)
+
+    if downsample:
+        audio = resample_poly(audio, 16000, framerate)
     return audio
  
-def prepare_data(audio):
+def prepare_data(audio: np.ndarray):
     """prepare a 1s or about 1s audio wav file into flattened features"""
     if len(audio) >= 16000:
         audio = audio[:16000]
@@ -124,7 +134,6 @@ class MFCC:
         self.n_mel_filters = 26
         self.window = hamming
         
-    
     def __call__(self, frame):
         '''Frame must be a 512 length np array of f32'''
         self.mfccf32 = cmsisdsp.arm_mfcc_instance_f32()
@@ -152,8 +161,9 @@ class MFCC:
 # 16kHz 25ms frame is 400 samples
 
 if __name__ == "__main__":
-    audio = load_wav('output.wav')
-    audio = load_wav("0b7ee1a0_nohash_4_learn_aug4.wav")
+    audio = load_wav('../output.wav')
+    # audio = load_wav("speech-data/go/0a2b400e_nohash_0.wav")
+    print(max(audio))
     print(f'{len(audio)=}')
     out = []
     out2 = []
@@ -174,8 +184,14 @@ if __name__ == "__main__":
     ax[0].set_xlabel("Frame Index")
 
     import python_speech_features
-    out = python_speech_features.mfcc(audio.T, appendEnergy=False, ceplifter=0)
+    out = python_speech_features.mfcc(audio.T, appendEnergy=False, ceplifter=22)
     im2 = ax[1].imshow(out.T, aspect='auto')
+    # audio, sr = torchaudio.load("speech-data/go/0a2b400e_nohash_0.wav")
+    # transform = torchaudio.transforms.MFCC(sample_rate=sr, n_mfcc=12,
+                                        #    melkwargs={"n_fft": 512, "hop_length": 400,
+                                                    #   "n_mels": 26})
+    # out = transform(audio)
+    # im2 = ax[1].imshow(out[0], aspect='auto')
     ax[1].set_ylabel("MFCC Coef")
     ax[1].set_xlabel("Frame Index")
 

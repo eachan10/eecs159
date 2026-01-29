@@ -1,15 +1,24 @@
 import nn
+import torch.ao.quantization as quant
 from audio_preprocessor import *
 import torch
 from time import time, sleep
 import pyaudio
 import numpy as np
+from test import MathNet
 
 if __name__ == "__main__":
     net = nn.Net()
-    net.eval()
     # net.load_state_dict(torch.load("out/model_iter0.pth", weights_only=True))
-    net.load_state_dict(torch.load("model.pth", weights_only=True))
+    if True:
+        quant.prepare_qat(net, inplace=True)
+        net.load_state_dict(torch.load("out/model_iter0.pth", weights_only=True))
+        nn.quantize(net)
+        net.eval()
+        math_net = MathNet(net)
+    else:
+        net.eval()
+        net.load_state_dict(torch.load("model.pth", weights_only=True))
     mfcc_inst = MFCC()
 
     if True:
@@ -33,12 +42,13 @@ if __name__ == "__main__":
             frames[-1] = mfcc(new_frame)
             features = torch.tensor(frames.flatten()).unsqueeze(0)
             with torch.no_grad():
-                out = net(features)
+                # out = net(features)
+                out = math_net(features)
                 pred = torch.sigmoid(out).item()
             # print(pred, pred > 0.9)
             if np.isnan(frames).any():
                 break
-            if pred > 0.8:
+            if pred > 0.7:
                 pred_count += 1
             else:
                 pred_count = 0
@@ -48,7 +58,7 @@ if __name__ == "__main__":
                     last = True
                     timestamp = time()
             elif time() - 1 > timestamp:
-                print(f"\r{out:.3f} {pred*100:.2f}%     ", end='')
+                print(f"\r{out.item():.3f} {pred*100:.2f}%     ", end='')
                 last = False
     else:
         audio = load_wav("output.wav")

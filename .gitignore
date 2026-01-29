@@ -1,4 +1,8 @@
 *_set.txt
+*.pth
 speech-data
 venv
 __pycache__
+token.txt
+LJSpeech
+clotho

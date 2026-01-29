@@ -45,32 +45,32 @@ def main():
         if not p.name.endswith(".wav"): continue
         noise.append(AudioSegment.from_file(p))
     dirs = [p for p in Path("./speech-data").iterdir() if p.is_dir()]
-    for dir_ in dirs:
-        if dir_.name == "_background_noise_": continue
-        if "augmented" in dir_.name: continue
-        for p in dir_.iterdir():
-            if not p.name.endswith(".wav"): continue
-            count = 10 if dir_.name == "stop" else 5
-            for n in range(count):
-                sample = AudioSegment.from_file(p)
-                sample = augment(sample, noise)
+    # for dir_ in dirs:
+        # if dir_.name == "_background_noise_": continue
+        # if "augmented" in dir_.name: continue
+        # for p in dir_.iterdir():
+            # if not p.name.endswith(".wav"): continue
+            # count = 10 if dir_.name == "stop" else 3
+            # for n in range(count):
+            #     sample = AudioSegment.from_file(p)
+            #     sample = augment(sample, noise)
                 
-                if dir_.name == "stop":
-                    # save to stop_augmented
-                    fp = f"speech-data/stop-augmented/{p.stem}_{dir_.name}_aug{n}.wav"
-                    sample.export(fp, format='wav')
-                else:
-                    # save to negative_augmented
-                    fp = f"speech-data/neg-augmented/{p.stem}_{dir_.name}_aug{n}.wav"
-                    sample.export(fp, format='wav')
-        for idx, n in enumerate(noise):
-            for samp in range(1000):
-                duration = len(n)
-                start = random.randint(0, duration-1001)
-                sample = n[start:start+1000]
-                sample += random.randint(-12, 12)
-                fp = f"speech-data/neg-augmented/noise{idx}-{samp}.wav"
-                sample.export(fp, format='wav')
+                # if dir_.name == "stop":
+                #     # save to stop_augmented
+                #     fp = f"speech-data/stop-augmented/{p.stem}_{dir_.name}_aug{n}.wav"
+                #     sample.export(fp, format='wav')
+                # else:
+                #     # save to negative_augmented
+                #     fp = f"speech-data/neg-augmented/{p.stem}_{dir_.name}_aug{n}.wav"
+                #     sample.export(fp, format='wav')
+    for idx, n in enumerate(noise):
+        for samp in range(15000):
+            duration = len(n)
+            start = random.randint(0, duration-1001)
+            sample = n[start:start+1000]
+            sample += random.randint(-12, 12)
+            fp = f"speech-data/neg-augmented/noise{idx}-{samp}.wav"
+            sample.export(fp, format='wav')
 
 
 

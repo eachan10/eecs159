@@ -8,154 +8,127 @@ infer whether the sample contains the word stop or does not contain stop
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+import torch.ao.quantization as quant
 import tqdm
 
+
 from audio_preprocessor import *
-
-
-SAMPLE_FREQ = 16000
-COEF_PER_FRAME = 12
-FRAME_LENGTH = 400
-FRAME_STEP = 300
-FRAMES_PER_SEC = len(range(0, SAMPLE_FREQ - FRAME_LENGTH, FRAME_STEP)) # 40
-INPUT_SIZE = COEF_PER_FRAME * FRAMES_PER_SEC
-
-
-class WavDataset(Dataset):
-    def __init__(self, set_path):
-        self.root_dir = "speech-data"
-        with open(set_path) as f:
-            self.file_paths = [line.strip() for line in f.readlines()]
-        self.mfcc = None
-    
-    def __len__(self):
-        return len(self.file_paths)
-    
-    def __getitem__(self, idx):
-        if self.mfcc is None:
-            self.mfcc = MFCC()
-        fpath = self.file_paths[idx]
-        wavpath = f"{self.root_dir}/{fpath}"
-        audio = load_wav(wavpath)
-        label = 1 if fpath.startswith("stop") else 0
-        tries = 0
-        while 1:
-            audio_frames = prepare_data(audio)
-            features = np.zeros((FRAMES_PER_SEC, COEF_PER_FRAME), dtype=np.float32)
-            for idx, frame in enumerate(audio_frames):
-                # features[idx] = self.mfcc(frame)
-                features[idx] = mfcc(frame)
-            # features = process_frames(audio_frames)
-            if not np.isfinite(features).all():
-                if tries < 3:
-                    tries += 1
-                    continue
-                np.save("audio_frames.npy", audio_frames)
-                np.save("features.npy", features)
-                raise RuntimeError(f"Input has NaN/Inf from file {fpath}")
-            return features.flatten(), label
+from data import INPUT_SIZE
 
 BATCH_SIZE = 64
-training_data_loader = DataLoader(WavDataset("training_set.txt"),
-                                  batch_size=BATCH_SIZE,
-                                  shuffle=True,
-                                  num_workers=4,
-                                  prefetch_factor=2,
-                                  )
-testing_data_loader = DataLoader(WavDataset("testing_set.txt"),
-                                 batch_size=BATCH_SIZE,
-                                 shuffle=True,
-                                 num_workers=4,
-                                 prefetch_factor=2,
-                                 )
-validation_data_loader = DataLoader(WavDataset("validation_set.txt"),
-                                    batch_size=BATCH_SIZE,
-                                    shuffle=True,
-                                    num_workers=4,
-                                    prefetch_factor=2,
-                                    )
 
-class Net(nn.Sequential):
+class Net(nn.Module):
     def __init__(self):
-        super().__init__(
-            nn.Linear(INPUT_SIZE, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, 1)
-        )
+        super().__init__()
+        # self.qconfig = quant.default_qat_qconfig
+        # self.qconfig = quant.QConfig(
+        #     activation=quant.FakeQuantize.with_args(
+        #         observer=quant.MinMaxObserver,
+        #         qscheme=torch.per_tensor_symmetric,
+        #         dtype=torch.int8
+        #     ),
+        #     weight=quant.FakeQuantize.with_args(
+        #         observer=quant.MinMaxObserver,
+        #         qscheme=torch.per_tensor_symmetric,
+        #         dtype=torch.int8
+        #     )
+        # )
+        self.qconfig = quant.get_default_qat_qconfig("qnnpack")
+        self.quant = quant.QuantStub()
+        self.dequant = quant.DeQuantStub()
+        self.fc1 = nn.Linear(INPUT_SIZE, 512)
+        self.bn1 = nn.BatchNorm1d(512)
+        self.relu1 = nn.ReLU()
+        self.drop1 = nn.Dropout(0.4)
+        self.fc2 = nn.Linear(512, 256)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.relu2 = nn.ReLU()
+        self.drop2 = nn.Dropout(0.4)
+        self.fc3 = nn.Linear(256, 64)
+        self.bn3 = nn.BatchNorm1d(64)
+        self.relu3 = nn.ReLU()
+        self.drop3 = nn.Dropout(0.2)
+        self.fc4 = nn.Linear(64, 1)
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.drop1(self.relu1(self.bn1(self.fc1(x))))
+        x = self.drop2(self.relu2(self.bn2(self.fc2(x))))
+        x = self.drop3(self.relu3(self.bn3(self.fc3(x))))
+        x = self.fc4(x)
+        x = self.dequant(x)
+        return x
 
 THRESHOLD = 0.7
 
 def validate(nn, threshold, data_loader):
-    nn.eval()
+    for n in nn: n.eval()
+    # array of correct count for each net for each threshold
+    correct_pos = np.zeros((len(nn), len(threshold)), dtype=np.int32)
+    correct_neg = np.zeros((len(nn), len(threshold)), dtype=np.int32)
     with torch.no_grad():
-        total = 0
-        correct = 0
+        total = {"pos": 0, "neg": 0}
         for data in tqdm.tqdm(data_loader, desc="Validation", unit="Batches"):
             wavs, labels = data
-            outputs = nn(wavs)
-            predicted = torch.sigmoid(outputs[:,0]) > threshold
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-    nn.train()
-    print(f"Accuracy is {correct}/{total} : {correct*100/total:.2f}%")
+            for idx, n in enumerate(nn):
+                outputs = n(wavs)
+                sig = torch.sigmoid(outputs[:,0])
+                for i, t in enumerate(threshold):
+                    predicted = sig > t
+                    correct_pos[idx, i] += ((predicted == labels) and (labels == 1)).sum().item()
+                    correct_neg[idx, i] += ((predicted == labels) and (labels == 0)).sum().item()
+            total["pos"] += (labels == 1).sum().item()
+            total["neg"] += (labels == 0).sum().item()
+    for n in nn: n.train()
+    tot_p = total["pos"]
+    tot_n = total["neg"]
+    for idx in range(len(nn)):
+        print(f"Model #{idx}")
+        for cp, cn, t in zip(correct_pos[idx], correct_neg,threshold):
+            acc = (cp+cn) / (tot_p+tot_n)
+            pos = cp / tot_p
+            neg = cn / tot_n
+            print(f"Threshold: {t} "
+                  f"Acc {cp+cn}/{tot_p+tot_n} : {acc*100:.2f}% "
+                  f"Pos: {cp}/{tot_p} : {pos*100:.2f} "
+                  f"Neg: {cn}/{tot_n} : {neg*100:.2f}")
 
-def train(net, epochs, w):
-    training_data_loader = DataLoader(WavDataset("training_set.txt"),
-                                      batch_size=BATCH_SIZE,
-                                      shuffle=True,
-                                      num_workers=4,
-                                      prefetch_factor=2,
-                                      )
+def train_loop(net, lr, w, loader):
     weights = torch.tensor([w], dtype=torch.float32)
     criterion = nn.BCEWithLogitsLoss(pos_weight=weights)
-    optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0, weight_decay=1e-4)
     running_loss_batches = 20
-    for epoch in range(epochs):
-        print(f"Epoch {epoch+1} starting...")
-        running_loss = 0.0
-        bar = tqdm.tqdm(enumerate(training_data_loader, 0),
-                        total=len(training_data_loader),
-                        unit="Batches")
-        for i, data in bar:
-            inputs, labels = data
-            optimizer.zero_grad()
+    optimizer = optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
+    running_loss = 0.0
+    bar = tqdm.tqdm(enumerate(loader, 0),
+                    total=len(loader),
+                    unit="Batches")
+    for i, data in bar:
+        inputs, labels = data
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, labels.float().unsqueeze(1))
+        loss.backward()
+        optimizer.step()
 
-            outputs = net(inputs)
-            loss = criterion(outputs, labels.float().unsqueeze(1))
-            loss.backward()
-            optimizer.step()
+        running_loss += loss.item()
+        if i % running_loss_batches == running_loss_batches - 1:
+            bar.set_description(f'Batches: {i+1-running_loss_batches}-{i + 1} loss: {running_loss / running_loss_batches:.3f}')
+            running_loss = 0.0
 
-            running_loss += loss.item()
-            if i % running_loss_batches == running_loss_batches - 1:
-                bar.set_description(f'Batches: {i+1-running_loss_batches}-{i + 1} loss: {running_loss / running_loss_batches:.3f}')
-                running_loss = 0.0
-        # validate(net, THRESHOLD, validation_data_loader)
+def fuse_module(net):
+    net.eval()
+    # net = quant.fuse_modules(net, [['fc1','bn1'],
+    #                                ['fc2','bn2'],
+    #                                ['fc3','bn3']],
+    #                               fuser_func=torch.nn.utils.fuse_linear_bn_eval)
+    # net = quant.fuse_modules(net, [['fc1','bn1','relu1'],
+                                #    ['fc2','bn2','relu2'],
+                                #    ['fc3','bn3','relu3']])
+    net.fc1 = torch.nn.utils.fuse_linear_bn_eval(net.fc1, net.bn1)
+    net.bn1 = torch.nn.Identity()
+    net.fc2 = torch.nn.utils.fuse_linear_bn_eval(net.fc2, net.bn2)
+    net.bn2 = torch.nn.Identity()
+    net.fc3 = torch.nn.utils.fuse_linear_bn_eval(net.fc3, net.bn3)
+    net.bn3 = torch.nn.Identity()
 
-def main():
-    LOAD = False
-    EPOCHS = 5
-    MODEL_LOAD_PATH = "./model.pth"
-    MODEL_SAVE_PATH = "./model.pth"
-    net = Net()
-    if LOAD:
-        net.load_state_dict(torch.load(MODEL_LOAD_PATH, weights_only=True))
-    try:
-        train(net, EPOCHS, 14)
-    finally:
-        torch.save(net.state_dict(), MODEL_SAVE_PATH)
-
-
-if __name__ == "__main__":
-    main()
-    print("Finished Training")
+def quantize(net):
+    quant.convert(net, inplace=True)
