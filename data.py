@@ -49,9 +49,9 @@ class CombinedDataset(IterableDataset):
             elif r < 0.3:
                 yield random.choice(noise_set)
             elif r < 0.65:
-                yield from neg_set
+                yield next(neg_set)
             else:
-                yield from neg_set2
+                yield next(neg_set2)
 
 class NoiseSet():
     def __init__(self):
