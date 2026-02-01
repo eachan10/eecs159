@@ -28,7 +28,7 @@ def quantized_linear(x_uint8, x_scale, x_zero_point,
     weight_int32 = weight_int8.to(torch.int32) - weight_zero_point
     acc_int32 = torch.mm(x_int32, weight_int32.T).to(torch.int32)
     bias_scale = x_scale * weight_scale
-    bias_int32 = (bias_fp32 / bias_scale).to(torch.int32)
+    bias_int32 = torch.round(bias_fp32 / bias_scale).to(torch.int32)
     acc_int32 = acc_int32 + bias_int32
     USE_FLOAT=False
     if USE_FLOAT:
@@ -36,6 +36,7 @@ def quantized_linear(x_uint8, x_scale, x_zero_point,
         acc_int32 = torch.round(acc_int32 / acc_scale) + output_zero_point  # float div
     else:
         SHIFT = 22
+        acc_scale = torch.round((1 << SHIFT) * (x_scale * weight_scale / output_scale)).to(torch.int32)
         acc_int32 *= acc_scale
         acc_int32 += (1 << (SHIFT - 1))
         acc_int32 >>= SHIFT
@@ -68,6 +69,7 @@ class MathNet:
         self.fc2_params = extract_qlin_params(net.fc2)
         self.fc3_params = extract_qlin_params(net.fc3)
         self.fc4_params = extract_qlin_params(net.fc4)
+        self.fc1, self.fc2, self.fc3, self.fc4 = dump_params(net)
     
     def eval(self):
         ...
@@ -77,7 +79,7 @@ class MathNet:
         return self.forward(x)
     
     def quantize(self, x):
-        return (torch.round((x/self.in_scale)) + self.in_zero_point).to(torch.uint8)
+        return torch.clamp((torch.round((x/self.in_scale)) + self.in_zero_point), 0, 255).to(torch.uint8)
     
     def forward(self, x):
         # quantize input
@@ -121,7 +123,130 @@ class MathNet:
         # return out4
         fp32_out = (uint8_x.to(torch.int32) - x_zero_point).to(torch.float32) * x_scale
         return fp32_out
+    
+    def forward2(self, x):
+        x = quantize_x(x, self.in_scale, self.in_zero_point)
+        # FC1
+        x = quantized_linear_c(self.fc1, x)
+        # ReLU
+        x = torch.clamp(x, min=0)
+        # FC2
+        x = quantized_linear_c(self.fc2, x)
+        # ReLU
+        x = torch.clamp(x, min=0)
+        # FC3
+        x = quantized_linear_c(self.fc3, x)
+        # ReLU
+        x = torch.clamp(x, min=0)
+        # FC4
+        x = quantized_linear_c(self.fc4, x)
+        # dequantize
+        x = x
+        return x
+    
+    def dequantize(self, x):
+        return x.to(torch.float32) * self.fc4["output_scale"]
 
+def layer_params(x_scale, lin):
+    SHIFT = 22
+    curr = {}
+    w = lin.weight()
+    b_scale = x_scale * w.q_scale()
+    b = torch.round(lin.bias() / b_scale).to(torch.int32)
+    acc_scale = x_scale*w.q_scale()/torch.tensor(lin.scale)
+    curr["weight"]            = w.int_repr()
+    curr["bias"]              = b
+    curr["output_scale"]      = torch.tensor(lin.scale)
+    curr["output_zero_point"] = torch.tensor(lin.zero_point)
+    curr["acc_scale"]         = torch.round((1<<SHIFT)*acc_scale).to(torch.int32)
+    curr["shift"]             = SHIFT
+    return curr
+
+
+def dump_params(net: Net):
+    fc1 = layer_params(net.quant.scale.to(torch.float32), net.fc1)
+    fc2 = layer_params(fc1["output_scale"], net.fc2)
+    fc3 = layer_params(fc2["output_scale"], net.fc3)
+    fc4 = layer_params(fc3["output_scale"], net.fc4)
+    return fc1, fc2, fc3, fc4
+
+def dump_params_array(params, prefix):
+    all_str = []
+    # weights 2d matrix
+    w : torch.Tensor= params["weight"]
+    w_str = f"int16_t {prefix}_weights[{w.size(0)}*{w.size(1)}] = {{\n"
+    for idx, row in enumerate(w):
+        count = 0
+        # w_str += "  {\n"
+        w_str += f"//////// Row {idx}  /////////\n"
+        for col in row:
+            if count == 0:
+                w_str += "    "
+            w_str += f"{col.item():5},"
+            if count == 15:
+                w_str += "\n"
+                count = 0
+            else:
+                count += 1
+        # w_str += "\n  },\n"
+    w_str += "\n};\n"
+    all_str.append(w_str)
+    # bias 1d array
+    b = params["bias"]
+    b_str = f"int32_t {prefix}_bias[{b.size(0)}] = {{\n"
+    count = 0
+    for col in b:
+        if count == 0:
+            b_str += "  "
+        b_str += f"{col.item():6},"
+        if count == 15:
+            b_str += "\n"
+            count = 0
+        else:
+            count += 1
+    b_str += "\n};\n"
+    all_str.append(b_str)
+
+    # output_scale int32
+    # out_scale = params["output_scale"]
+    # if type(out_scale) is torch.Tensor:
+        # out_scale = out_scale.item()
+    # os_str = f"int32_t {prefix}_output_scale = {out_scale};"
+    # all_str.append(os_str)
+
+    # output_zero_point int32
+    out_zero_point = params["output_zero_point"]
+    if type(out_zero_point) is torch.Tensor:
+        out_zero_point = out_zero_point.item()
+    ozp_str = f"int32_t {prefix}_output_zero_point = {out_zero_point};"
+    all_str.append(ozp_str)
+    # accumulator scale int32
+    acc_scale = params["acc_scale"]
+    if type(acc_scale) is torch.Tensor:
+        acc_scale = acc_scale.item()
+    as_str = f"int32_t {prefix}_acc_scale = {acc_scale};"
+    all_str.append(as_str)
+    # shfit int32?
+    shift = params["shift"]
+    s_str = f"int32_t {prefix}_shift = {shift};"
+    all_str.append(s_str)
+    return "\n".join(all_str)
+
+def quantize_x(x, scale, zero_point):
+    return torch.clamp(torch.round(x / scale), -zero_point, 255-zero_point).to(torch.int16)
+
+def quantized_linear_c(lin: dict, x: torch.tensor):
+    # I can ommit the x and output zero points add/sub
+    # since I will keep things at int16
+    x_int32 = x.to(torch.int32)
+    w_int32 = lin["weight"].to(torch.int32)
+    acc_int32 = torch.mm(x_int32, w_int32.T)
+    acc_int32 += lin["bias"]
+    acc_int32 *= lin["acc_scale"]
+    acc_int32 += (1 << (lin["shift"]-1))  # rounding
+    acc_int32 >>= lin["shift"]
+    acc_int32 = torch.clamp(acc_int32, -lin["output_zero_point"], 255-lin["output_zero_point"]).to(torch.int16)
+    return acc_int32
 
 if __name__ == "__main__":
     net = Net()
@@ -131,7 +256,7 @@ if __name__ == "__main__":
     quantize(net)
     net.eval()
 
-    x = torch.randn(10,624) * 10 - 50
+    x = torch.randn(10,624) * 50
 
     math_net = MathNet(net)
     golden = net.forward(x)
@@ -145,11 +270,60 @@ if __name__ == "__main__":
     x3 = x3.int_repr()
     # out1, out2, out3, out4 = math_net.forward(x)
     out = math_net.forward(x)
+    out2 = math_net.forward2(x)
     # print(f"Golden: {x4.int_repr()}")
     print(f"Golden: {golden}")
     print(f"Out:    {out}")
+    print(f"Out2:   {out2}")
+    print(f"Out dq: {math_net.dequantize(out2)}")
 
     # t= torch.randn(5,64)
     # t = net.quant(t)
     # print(net.fc4(t).int_repr())
     # print(fake_forward(net.fc4, t))
+
+    # Dump model params as C decl
+    if True:
+        with open("src/model_dump.h", "w") as f:
+            f.write(dump_params_array(math_net.fc1, "fc1"))
+            f.write("\n")
+            f.write(dump_params_array(math_net.fc2, "fc2"))
+            f.write("\n")
+            f.write(dump_params_array(math_net.fc3, "fc3"))
+            f.write("\n")
+            f.write(dump_params_array(math_net.fc4, "fc4"))
+            f.write("\n")
+
+    # create test vectors
+    if False:
+        xq = quantize_x(x, math_net.in_scale, math_net.in_zero_point)
+        x_str = f"int16_t x[{xq.size(0)}][{xq.size(1)}] = {{\n"
+        for row in xq:
+            count = 0
+            x_str += "  {\n"
+            for col in row:
+                if count == 0:
+                    x_str += "    "
+                x_str += f"{col.item():5},"
+                if count == 15:
+                    x_str += "\n"
+                    count = 0
+                else:
+                    count += 1
+            x_str += "\n  },\n"
+        x_str += "\n};\n"
+        y = out2
+        y_str = f"int16_t y[{y.size(0)}] = {{"
+        for col in y:
+            if count == 0:
+                y_str += "  "
+            y_str += f"{col.item():6},"
+            if count == 15:
+                y_str += "\n"
+                count = 0
+            else:
+                count += 1
+        y_str += "\n};\n"
+        with open("src/test_vec.h", "w") as f:
+            f.write(x_str)
+            f.write(y_str)
