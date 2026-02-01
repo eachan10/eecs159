@@ -28,8 +28,10 @@ with open("token.txt") as f:
 class CombinedDataset(IterableDataset):
     def __init__(self, split="train", txt_path="train_pos_set.txt", batches=10000, batch_size=64):
         super().__init__()
-        self.neg_set = PeoplesSpeech("clean", split)
-        self.neg_set2 = PeoplesSpeech("dirty", split)
+        self.neg_ds = PeoplesSpeech("clean", split)
+        self.neg_set = iter(self.neg_ds)
+        self.neg_ds2 = PeoplesSpeech("dirty", split)
+        self.neg_set2 = iter(self.neg_ds2)
         self.len = batches * batch_size
         self.pos_set = WavDataset(txt_path)
         self.noise_set = NoiseSet()
@@ -38,10 +40,12 @@ class CombinedDataset(IterableDataset):
         return self.len
     
     def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        self.len = self.len // worker_info.num_workers
         pos_set = self.pos_set
         noise_set = self.noise_set
-        neg_set = iter(self.neg_set)
-        neg_set2 = iter(self.neg_set2)
+        neg_set = self.neg_set
+        neg_set2 = self.neg_set2
         for _ in range(self.len):
             r = random.random()
             if r < 0.2:
@@ -49,9 +53,21 @@ class CombinedDataset(IterableDataset):
             elif r < 0.3:
                 yield random.choice(noise_set)
             elif r < 0.65:
-                yield next(neg_set)
+                try:
+                    val = next(neg_set)
+                except StopIteration:
+                    self.neg_set = iter(self.neg_ds)
+                    neg_set = self.neg_set
+                    val = next(neg_set)
+                yield val
             else:
-                yield next(neg_set2)
+                try:
+                    val = next(neg_set2)
+                except StopIteration:
+                    self.neg_set2 = iter(self.neg_ds2)
+                    neg_set2 = self.neg_set2
+                    val = next(neg_set2)
+                yield val
 
 class NoiseSet():
     def __init__(self):
@@ -189,5 +205,10 @@ class WavDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = PeoplesSpeech()
+    ds = CombinedDataset()
     dsi = iter(ds)
+    total = 0
+    for i in range(1000):
+        input, label = next(dsi)
+        total += label
+    print(f"{total}/1000 positive")

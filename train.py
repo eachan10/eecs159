@@ -15,7 +15,18 @@ def main():
     dataset = CombinedDataset("train", "train_pos_set.txt", 10000, 64)
     dataset_val = CombinedDataset("validation", "val_pos_set.txt", 1000, 64)
     quant.prepare_qat(net, inplace=True)
-
+    validation_data_loader = DataLoader(dataset_val,
+                                        batch_size=64,
+                                        num_workers=4,
+                                        prefetch_factor=2,
+                                        persistent_workers=True,
+                                       )
+    training_data_loader = DataLoader(dataset,
+                                      batch_size=64,
+                                      num_workers=4,
+                                      prefetch_factor=3,
+                                      persistent_workers=True,
+                                     )
     try:
         for i in range(5):
             print("============================")
@@ -31,21 +42,11 @@ def main():
             else:
                 net.train()
                 # net.apply(quant.enable_observer)
-            training_data_loader = DataLoader(dataset,
-                                              batch_size=64,
-                                              num_workers=4,
-                                              prefetch_factor=3,
-                                             )
             if i >= 5:
                 lr = 0.00001 * (0.95**i)
             else:
                 lr = 0.0001 * (0.95**i)
             train_loop(net, lr, 1, training_data_loader)
-            validation_data_loader = DataLoader(dataset_val,
-                                                batch_size=64,
-                                                num_workers=4,
-                                                prefetch_factor=2,
-                                               )
             print("Validating...")
             net.eval()
             validate([net], [0.5,0.6,0.7,0.8], validation_data_loader)
