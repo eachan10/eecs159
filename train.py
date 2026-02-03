@@ -1,4 +1,4 @@
-from nn import Net, train_loop, validate, fuse_module, quantize
+from nn import Net, ConvNet, train_loop, validate, fuse_module, quantize
 from data import CombinedDataset
 
 import torch
@@ -9,22 +9,27 @@ import os
 
 torch.autograd.set_detect_anomaly(True)
 
+QAT = False
+EPOCH_LENGTH = 10000
+
 def main():
     os.makedirs("out", exist_ok=True)
-    net = Net()
-    dataset = CombinedDataset("train", "train_pos_set.txt", 10000, 64)
-    dataset_val = CombinedDataset("validation", "val_pos_set.txt", 1000, 64)
-    quant.prepare_qat(net, inplace=True)
+    # net = Net()
+    net = ConvNet()
+    if QAT:
+        quant.prepare_qat(net, inplace=True)
+    dataset = CombinedDataset("train", "train_pos_set.txt", 2000, 64)
+    dataset_val = CombinedDataset("validation", "val_pos_set.txt", 500, 64)
     validation_data_loader = DataLoader(dataset_val,
                                         batch_size=64,
-                                        num_workers=4,
-                                        prefetch_factor=2,
+                                        num_workers=8,
+                                        prefetch_factor=4,
                                         persistent_workers=True,
                                        )
     training_data_loader = DataLoader(dataset,
                                       batch_size=64,
-                                      num_workers=4,
-                                      prefetch_factor=3,
+                                      num_workers=8,
+                                      prefetch_factor=4,
                                       persistent_workers=True,
                                      )
     try:
@@ -53,8 +58,9 @@ def main():
             net.train()
             torch.save(net.state_dict(), f"out/model_iter{i}.pth")
     finally:
-        fuse_module(net)
-        quantize(net)
+        if QAT:
+            fuse_module(net)
+            quantize(net)
         torch.save(net.state_dict(), "out/model_final.pth")
 
 if __name__ == "__main__":

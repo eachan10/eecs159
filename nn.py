@@ -50,6 +50,7 @@ class Net(nn.Module):
         self.drop3 = nn.Dropout(0.2)
         self.fc4 = nn.Linear(64, 1)
     def forward(self, x):
+        x = x.flatten()
         x = self.quant(x)
         x = self.drop1(self.relu1(self.bn1(self.fc1(x))))
         x = self.drop2(self.relu2(self.bn2(self.fc2(x))))
@@ -58,15 +59,70 @@ class Net(nn.Module):
         x = self.dequant(x)
         return x
 
+class ConvNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # self.qconfig = quant.get_default_qat_qconfig("qnnpack")
+        # self.quant = quant.QuantStub()
+        # self.dequant = quant.DeQuantStub()
+        # conv
+
+        # input (batch, 1, 52, 12)
+        # output (batch, 16, 52, 12)
+        self.conv1 = nn.Conv2d(in_channels=1,
+                               out_channels=16,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                               groups=1,
+                               bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.relu = nn.ReLU()
+        # input (batch, 16, 52, 12)
+        # output (batch, 16, 26, 12)
+        self.pool1 = nn.MaxPool2d(kernel_size=(2, 1))
+        # input (batch, 16, 26, 12)
+        # output (batch, 32, 26, 12)
+        self.conv2 = nn.Conv2d(in_channels=16,
+                               out_channels=32,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                               bias=False)
+        self.bn2 = nn.BatchNorm2d(32)
+        # input (batch, 32, 26, 12)
+        # output (batch, 32, 13, 6)
+        self.pool2 = nn.MaxPool2d(kernel_size=2)
+        # classiffier
+        self.flatten = nn.Flatten() # -> 32 * 13 * 6
+        self.fc1 = nn.Linear(32 * 13 * 6, 64)
+        self.drop1 = nn.Dropout(0.2)
+        self.fc2 = nn.Linear(64, 1)
+    
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.relu(x)
+        x = self.pool2(x)
+        x = self.flatten(x)
+        x = self.fc1(x)
+        x = self.drop1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
+
 THRESHOLD = 0.7
 
 def validate(nn, threshold, data_loader):
     for n in nn: n.eval()
     # array of correct count for each net for each threshold
-    correct_pos = np.zeros((len(nn), len(threshold)), dtype=np.int32)
-    correct_neg = np.zeros((len(nn), len(threshold)), dtype=np.int32)
+    correct = np.zeros((len(nn), len(threshold)), dtype=np.int32)
     with torch.no_grad():
-        total = {"pos": 0, "neg": 0}
+        total = 0
         for data in tqdm.tqdm(data_loader, desc="Validation", unit="Batches"):
             wavs, labels = data
             for idx, n in enumerate(nn):
@@ -74,23 +130,15 @@ def validate(nn, threshold, data_loader):
                 sig = torch.sigmoid(outputs[:,0])
                 for i, t in enumerate(threshold):
                     predicted = sig > t
-                    correct_pos[idx, i] += ((predicted == labels) and (labels == 1)).sum().item()
-                    correct_neg[idx, i] += ((predicted == labels) and (labels == 0)).sum().item()
-            total["pos"] += (labels == 1).sum().item()
-            total["neg"] += (labels == 0).sum().item()
+                    correct[idx, i] += (predicted == labels).sum().item()
+            total += len(labels)
     for n in nn: n.train()
-    tot_p = total["pos"]
-    tot_n = total["neg"]
     for idx in range(len(nn)):
         print(f"Model #{idx}")
-        for cp, cn, t in zip(correct_pos[idx], correct_neg,threshold):
-            acc = (cp+cn) / (tot_p+tot_n)
-            pos = cp / tot_p
-            neg = cn / tot_n
-            print(f"Threshold: {t} "
-                  f"Acc {cp+cn}/{tot_p+tot_n} : {acc*100:.2f}% "
-                  f"Pos: {cp}/{tot_p} : {pos*100:.2f} "
-                  f"Neg: {cn}/{tot_n} : {neg*100:.2f}")
+        for c, t in zip(correct[idx],threshold):
+            acc = c/total
+            print(f"Threshold: {t} " +
+                  f"Acc: {c}/{total} : {acc*100:.2f}")
 
 def train_loop(net, lr, w, loader):
     weights = torch.tensor([w], dtype=torch.float32)

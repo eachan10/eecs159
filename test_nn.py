@@ -7,9 +7,9 @@ from test import MathNet
 from data import WavDataset
 
 if __name__ == "__main__":
-    PATH = "archived/model_after_prepare_qat.pth"
+    PATH = "model_after_prepare_qat.pth"
     # PATH = "model_after_prepare_qat.pth"
-    PATH = "out/model_iter0.pth"
+    # PATH = "out/model_final.pth"
     net = Net()
     nets = []
     for i in range(1):
@@ -17,8 +17,8 @@ if __name__ == "__main__":
         # first are fp32 models
         # next are QAT models
         quant.prepare_qat(net, inplace=True)
-        # net.load_state_dict(torch.load(f"out/model_iter{i}.pth", weights_only=True))
         net.load_state_dict(torch.load(PATH, weights_only=True))
+        # net.load_state_dict(torch.load(f"out/model_iter{i}.pth", weights_only=True))
         fuse_module(net)
         quantize(net)
         nets.append(MathNet(net))
@@ -26,13 +26,13 @@ if __name__ == "__main__":
 
 #    math_net = MathNet(net)
 
-    stop_loader = DataLoader(WavDataset("val_pos.txt"),
+    stop_loader = DataLoader(WavDataset("val_pos_set.txt"),
                              batch_size=64,
                              shuffle=True,
                              num_workers=4,
                              prefetch_factor=2,
                              )
-    validation_data_loader = DataLoader(WavDataset("val_neg.txt"),
+    validation_data_loader = DataLoader(WavDataset("val_neg_set.txt"),
                              batch_size=64,
                              shuffle=True,
                              num_workers=4,

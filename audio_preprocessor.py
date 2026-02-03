@@ -115,7 +115,7 @@ def process_frames(audio_frames, mfcc_inst=None):
             out[idx] = mfcc_inst(frame)
         else:
             out[idx] = mfcc(frame)
-    return out.flatten()
+    return out
 
 SAMPLE_RATE = 16000
 FFT_SIZE = 512

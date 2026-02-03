@@ -26,12 +26,13 @@ with open("token.txt") as f:
     token = f.read()
 
 class CombinedDataset(IterableDataset):
-    def __init__(self, split="train", txt_path="train_pos_set.txt", batches=10000, batch_size=64):
+    def __init__(self, split="train", txt_path="train_pos_set.txt", txt_path_neg="train_neg_set.txt", batches=2000, batch_size=64):
         super().__init__()
         self.neg_ds = PeoplesSpeech("clean", split)
         self.neg_set = iter(self.neg_ds)
         self.neg_ds2 = PeoplesSpeech("dirty", split)
         self.neg_set2 = iter(self.neg_ds2)
+        self.neg_set3 = WavDataset(txt_path_neg)
         self.len = batches * batch_size
         self.pos_set = WavDataset(txt_path)
         self.noise_set = NoiseSet()
@@ -46,13 +47,16 @@ class CombinedDataset(IterableDataset):
         noise_set = self.noise_set
         neg_set = self.neg_set
         neg_set2 = self.neg_set2
+        neg_set3 = self.neg_set3
         for _ in range(self.len):
             r = random.random()
             if r < 0.2:
                 yield random.choice(pos_set)
             elif r < 0.3:
                 yield random.choice(noise_set)
-            elif r < 0.65:
+            elif r < 0.4:
+                yield random.choice(neg_set3)
+            elif r < 0.7:
                 try:
                     val = next(neg_set)
                 except StopIteration:
@@ -86,7 +90,7 @@ class NoiseSet():
         n = n[start_idx:start_idx+1000]
         audio = np.array(n.get_array_of_samples())
         audio_frames = prepare_data(audio)
-        features = process_frames(audio_frames)
+        features = np.expand_dims(process_frames(audio_frames), axis=0)
         return features, 0
 
 
@@ -114,7 +118,7 @@ class PeoplesSpeech:
 
             # break up into frames
             audio_frames = prepare_data(audio_arr)
-            features = process_frames(audio_frames)
+            features = np.expand_dims(process_frames(audio_frames), axis=0)
             yield features, 0
     
     def __iter__(self):
@@ -200,7 +204,7 @@ class WavDataset(Dataset):
             audio = np.array(augment(audio, self.noise).get_array_of_samples())
         label = 1 if fpath.startswith("stop") else 0
         audio_frames = prepare_data(audio)
-        features = process_frames(audio_frames)
+        features = np.expand_dims(process_frames(audio_frames), axis=0)
         return features, label
 
 
