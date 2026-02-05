@@ -18,13 +18,13 @@ def mel2hz(mel):
 # low and high frequencies for mel filterbanks
 LOW_FREQ = 0
 HIGH_FREQ = 8000
-BINS = 26
+BINS = 36
 endpoints = np.linspace(hz2mel(LOW_FREQ), hz2mel(HIGH_FREQ), BINS+2)
 endpoints = mel2hz(endpoints) # endpoints in hz
 endpoints = np.floor((512+1)/16000*endpoints) # endpoints in fft indices
 # each filterbank will be a 257 point array to multiply the fft by
 # the nonzero portion of the filterbank is a triangular function
-filterbanks = np.zeros((26, 257))
+filterbanks = np.zeros((BINS, 257))
 
 for j in range(BINS):
     start = int(endpoints[j])
@@ -125,7 +125,7 @@ FFT_SIZE = 512
 N_DCT_OUTPUTS = 12
 FREQ_MIN = 0
 FREQ_MAX = SAMPLE_RATE // 2
-N_MEL_FILTERS = 26
+N_MEL_FILTERS = 36
 
 class MFCC:
     def __init__(self):
