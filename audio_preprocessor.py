@@ -70,7 +70,8 @@ def mfcc(signal):
     L = 22.0
     n = np.arange(12)
     lift = 1 + L/2 * np.sin(np.pi*n/L)
-    return features[:12] * lift # only need the lower 12 for audio speech recognition
+    features:np.ndarray = features[:12] * lift
+    return features # only need the lower 12 for audio speech recognition
 
 hamming = 0.54 - 0.46 * np.cos(2*np.pi*np.arange(0,400)/(400-1))
 # the number of frames is the len of this range
@@ -115,6 +116,8 @@ def process_frames(audio_frames, mfcc_inst=None):
             out[idx] = mfcc_inst(frame)
         else:
             out[idx] = mfcc(frame)
+    # normalize: cepstral mean variance normalization
+    out = (out - out.mean()) / (out.std() + 1e-8)
     return out
 
 SAMPLE_RATE = 16000

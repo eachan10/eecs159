@@ -9,7 +9,7 @@ import os
 
 torch.autograd.set_detect_anomaly(True)
 
-QAT = False
+QAT = True
 EPOCH_LENGTH = 10000
 
 def main():
@@ -18,11 +18,17 @@ def main():
     net = ConvNet()
     if QAT:
         quant.prepare_qat(net, inplace=True)
-    dataset = CombinedDataset("train", "train_pos_set.txt", 2000, 64)
-    dataset_val = CombinedDataset("validation", "val_pos_set.txt", 500, 64)
+    net.load_state_dict(torch.load("out/model_final.pth", weights_only=True))
+    dataset = CombinedDataset("train",
+                              "clean", "dirty",
+                              "train_pos_set.txt", "train_neg_set.txt",
+                              4000, 64)
+    dataset_val = CombinedDataset("train",
+                                  "clean_sa", "dirty_sa",
+                                  "val_pos_set.txt", "val_neg_set.txt", 400, 64)
     validation_data_loader = DataLoader(dataset_val,
                                         batch_size=64,
-                                        num_workers=8,
+                                        num_workers=4,
                                         prefetch_factor=4,
                                         persistent_workers=True,
                                        )
@@ -33,7 +39,7 @@ def main():
                                       persistent_workers=True,
                                      )
     try:
-        for i in range(5):
+        for i in range(10):
             print("============================")
             print(f"      EPOCH #{i}")
             print("============================")
@@ -41,26 +47,26 @@ def main():
             print("Training...")
             # iter0, iter1 are fp32 models
             # iter2... are fused but not quantized
-            if i >= 4:
+            if i >= 9:
                 net.eval() # disable dropout for QAT
-                # net.apply(quant.disable_observer)
+                net.apply(quant.disable_observer)
             else:
                 net.train()
                 # net.apply(quant.enable_observer)
             if i >= 5:
-                lr = 0.00001 * (0.95**i)
-            else:
                 lr = 0.0001 * (0.95**i)
-            train_loop(net, lr, 1, training_data_loader)
+            else:
+                lr = 0.0002 * (0.95**i)
+            train_loop(net, lr=lr, w=1, loader=training_data_loader)
             print("Validating...")
             net.eval()
-            validate([net], [0.5,0.6,0.7,0.8], validation_data_loader)
+            validate([net], [0.3,0.4,0.5,0.6,0.7,0.8], validation_data_loader)
             net.train()
             torch.save(net.state_dict(), f"out/model_iter{i}.pth")
     finally:
-        if QAT:
-            fuse_module(net)
-            quantize(net)
+        # if QAT:
+            # fuse_module(net)
+            # quantize(net)
         torch.save(net.state_dict(), "out/model_final.pth")
 
 if __name__ == "__main__":

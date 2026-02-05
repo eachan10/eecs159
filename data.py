@@ -26,51 +26,48 @@ with open("token.txt") as f:
     token = f.read()
 
 class CombinedDataset(IterableDataset):
-    def __init__(self, split="train", txt_path="train_pos_set.txt", txt_path_neg="train_neg_set.txt", batches=2000, batch_size=64):
+    def __init__(self, split="train",
+                 neg1="clean", neg2="dirty",
+                 txt_path="train_pos_set.txt", txt_path_neg="train_neg_set.txt",
+                 batches=2000, batch_size=64):
         super().__init__()
-        self.neg_ds = PeoplesSpeech("clean", split)
-        self.neg_set = iter(self.neg_ds)
-        self.neg_ds2 = PeoplesSpeech("dirty", split)
-        self.neg_set2 = iter(self.neg_ds2)
+        self.neg_ds = PeoplesSpeech(neg1, split)
+        self.neg_ds2 = PeoplesSpeech(neg2, split)
         self.neg_set3 = WavDataset(txt_path_neg)
-        self.len = batches * batch_size
         self.pos_set = WavDataset(txt_path)
         self.noise_set = NoiseSet()
+        self.len = batches * batch_size
+
+        self.neg_set = iter(self.neg_ds)
+        self.neg_set2 = iter(self.neg_ds2)
     
     def __len__(self):
         return self.len
     
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        self.len = self.len // worker_info.num_workers
-        pos_set = self.pos_set
-        noise_set = self.noise_set
-        neg_set = self.neg_set
-        neg_set2 = self.neg_set2
-        neg_set3 = self.neg_set3
-        for _ in range(self.len):
+        l = self.len // worker_info.num_workers
+        for _ in range(l):
             r = random.random()
-            if r < 0.2:
-                yield random.choice(pos_set)
-            elif r < 0.3:
-                yield random.choice(noise_set)
+            if r < 0.15:
+                yield random.choice(self.pos_set)
             elif r < 0.4:
-                yield random.choice(neg_set3)
-            elif r < 0.7:
+                yield random.choice(self.noise_set)
+            elif r < 0.6:
+                yield random.choice(self.neg_set3)
+            elif r < 0.8:
                 try:
-                    val = next(neg_set)
+                    val = next(self.neg_set)
                 except StopIteration:
                     self.neg_set = iter(self.neg_ds)
-                    neg_set = self.neg_set
-                    val = next(neg_set)
+                    val = next(self.neg_set)
                 yield val
             else:
                 try:
-                    val = next(neg_set2)
+                    val = next(self.neg_set2)
                 except StopIteration:
                     self.neg_set2 = iter(self.neg_ds2)
-                    neg_set2 = self.neg_set2
-                    val = next(neg_set2)
+                    val = next(self.neg_set2)
                 yield val
 
 class NoiseSet():
@@ -80,6 +77,8 @@ class NoiseSet():
         for p in Path(f"{self.root_dir}/_background_noise_").iterdir():
             if not p.name.endswith(".wav"): continue
             self.noise.append(AudioSegment.from_file(p))
+        for _ in range(5):
+            self.noise.append(AudioSegment.silent(1000, 16000))
     
     def __len__(self):
         return len(self.noise)
@@ -88,6 +87,7 @@ class NoiseSet():
         n = self.noise[idx]
         start_idx = random.randint(0, len(n)-1000)
         n = n[start_idx:start_idx+1000]
+        n = augment(n, self.noise)
         audio = np.array(n.get_array_of_samples())
         audio_frames = prepare_data(audio)
         features = np.expand_dims(process_frames(audio_frames), axis=0)
@@ -97,12 +97,8 @@ class NoiseSet():
 class PeoplesSpeech:
     def __init__(self, hf_name="clean", split="train"):
         self.hf_name = hf_name
-        self.ds = (load_dataset("MLCommons/peoples_speech", hf_name, streaming=True, token=token)
-              .select_columns(["audio", "text"])
-              .shuffle()
-        )
-        self.ds = self.ds["train"]
-    
+        self.split = split
+
     def _generator(self, ds):
         for data in ds:
             audio = data["audio"]
@@ -113,8 +109,12 @@ class PeoplesSpeech:
             if "stop" in text:
                 continue
             audio_arr = audio["array"]
+            if len(audio_arr) <= 16000: continue
             idx = random.randint(0, len(audio_arr) - 16000)
             audio_arr = audio_arr[idx:idx+16000]
+
+            # random gain
+            gain = random.random() * 2 + 0.5 # lin gain from 0.5, 2.5
 
             # break up into frames
             audio_frames = prepare_data(audio_arr)
@@ -129,7 +129,11 @@ class PeoplesSpeech:
         else:
             shards = worker_info.num_workers
             idx = worker_info.id
-        ds = self.ds.shuffle().shard(shards, idx)
+        ds = (load_dataset("MLCommons/peoples_speech", self.hf_name, streaming=True, token=token)
+              .select_columns(["audio", "text"])
+        )
+        ds = ds[self.split]
+        ds = ds.shard(shards, idx).shuffle()
         return self._generator(ds)
 
 # class LJSpeechDataset(Dataset):
@@ -209,10 +213,21 @@ class WavDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = CombinedDataset()
+    # ds = CombinedDataset()
+    # dsi = iter(ds)
+    # total = 0
+    # for i in range(1000):
+        # input, label = next(dsi)
+        # total += label
+    # print(f"{total}/1000 positive")
+    ds = (load_dataset("MLCommons/peoples_speech", "clean", streaming=True, token=token)
+            .select_columns(["audio", "text"])
+    )
+    ds = ds["train"]
     dsi = iter(ds)
-    total = 0
-    for i in range(1000):
-        input, label = next(dsi)
-        total += label
-    print(f"{total}/1000 positive")
+    data = next(dsi)
+    aud = np.array(data["audio"]["array"])
+    aud = aud * 0xffff/2
+    aud = np.array(aud, dtype=np.int16)
+    seg = AudioSegment(aud.tobytes(), frame_rate=16000, sample_width=2, channels=1)
+    seg.export("test.wav", format="wav")

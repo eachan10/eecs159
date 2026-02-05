@@ -19,14 +19,19 @@ def augment(audio: AudioSegment, noise):
     # get 1000ms slice of noise
     noise_sample = random.choice(noise)
     duration = len(noise_sample)  # length in ms
-    start = random.randint(0, duration-1001)
+    start = random.randint(0, duration-1000)
     noise_slice = noise_sample[start:start+1000] # 1000ms slice
 
     # calculate noise gain with target snr
     signal_rms = audio.rms
     noise_rms = noise_slice.rms
-    noise_rms_target = signal_rms / (10 ** (snr / 20))
-    noise_gain = 20 * math.log10(noise_rms_target / noise_rms)
+    if noise_rms == 0:  # noise is silence
+        noise_gain = 0
+    elif signal_rms == 0:  # signal is silence
+        noise_gain = random.randint(-2, 5)
+    else:
+        noise_rms_target = signal_rms / (10 ** (snr / 20))
+        noise_gain = 20 * math.log10(noise_rms_target / noise_rms)
 
     # timeshift +- 100ms
     # reverb?
@@ -66,7 +71,7 @@ def main():
     for idx, n in enumerate(noise):
         for samp in range(15000):
             duration = len(n)
-            start = random.randint(0, duration-1001)
+            start = random.randint(0, duration-1000)
             sample = n[start:start+1000]
             sample += random.randint(-12, 12)
             fp = f"speech-data/neg-augmented/noise{idx}-{samp}.wav"
