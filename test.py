@@ -1,4 +1,4 @@
-from nn import Net, fuse_module, quantize
+from nn import ConvNet, Net, DSConvNet, fuse_module, quantize
 import torch
 import torch.ao.quantization as quant
 
@@ -148,20 +148,31 @@ class MathNet:
         return x.to(torch.float32) * self.fc4["output_scale"]
 
 def layer_params(x_scale, lin):
-    SHIFT = 22
+    shift = 5
     curr = {}
     w = lin.weight()
     b_scale = x_scale * w.q_scale()
-    b = torch.round(lin.bias() / b_scale).to(torch.int32)
+    if lin.bias() is not None:
+        b = torch.round(lin.bias() / b_scale).to(torch.int32)
+    else: # conv with bias diabled
+        b = torch.zeros(lin.out_channels).to(torch.int32)
     acc_scale = x_scale*w.q_scale()/torch.tensor(lin.scale)
     curr["weight"]            = w.int_repr()
     curr["bias"]              = b
     curr["output_scale"]      = torch.tensor(lin.scale)
     curr["output_zero_point"] = torch.tensor(lin.zero_point)
-    curr["acc_scale"]         = torch.round((1<<SHIFT)*acc_scale).to(torch.int32)
-    curr["shift"]             = SHIFT
+    while (1<<shift)*acc_scale < 10000:
+        shift += 1
+        curr["acc_scale"] = torch.round((1<<shift)*acc_scale).to(torch.int32)
+    curr["shift"]             = shift
     return curr
 
+def dump_params_conv(net: ConvNet):
+    conv1 = layer_params(net.quant.scale.to(torch.float32), net.conv1)
+    conv2a = layer_params(conv1["output_scale"], net.conv2a)
+    conv2b = layer_params(conv2a["output_scale"], net.conv2b)
+    fc1 = layer_params(conv2b["output_scale"], net.fc1)
+    return conv1, conv2a, conv2b, fc1
 
 def dump_params(net: Net):
     fc1 = layer_params(net.quant.scale.to(torch.float32), net.fc1)
@@ -174,12 +185,12 @@ def dump_params_array(params, prefix):
     all_str = []
     # weights 2d matrix
     w : torch.Tensor= params["weight"]
-    w_str = f"int16_t {prefix}_weights[{w.size(0)}*{w.size(1)}] = {{\n"
+    w_str = f"int16_t {prefix}_weights[{w.numel()}] = {{\n"
     for idx, row in enumerate(w):
         count = 0
         # w_str += "  {\n"
         w_str += f"//////// Row {idx}  /////////\n"
-        for col in row:
+        for col in row.flatten():
             if count == 0:
                 w_str += "    "
             w_str += f"{col.item():5},"
@@ -193,7 +204,7 @@ def dump_params_array(params, prefix):
     all_str.append(w_str)
     # bias 1d array
     b = params["bias"]
-    b_str = f"int32_t {prefix}_bias[{b.size(0)}] = {{\n"
+    b_str = f"int32_t {prefix}_bias[{b.numel()}] = {{\n"
     count = 0
     for col in b:
         if count == 0:
@@ -249,33 +260,89 @@ def quantized_linear_c(lin: dict, x: torch.tensor):
     return acc_int32
 
 if __name__ == "__main__":
-    net = Net()
+    net = DSConvNet()
     quant.prepare_qat(net, inplace=True)
-    net.load_state_dict(torch.load("model_after_prepare_qat.pth"))
+    net.load_state_dict(torch.load("out/model_iter9.pth"))
     fuse_module(net)
     quantize(net)
     net.eval()
+    # net = Net()
+    # quant.prepare_qat(net, inplace=True)
+    # net.load_state_dict(torch.load("model_after_prepare_qat.pth"))
+    # fuse_module(net)
+    # quantize(net)
+    # net.eval()
 
-    x = torch.randn(10,624) * 50
+    x = torch.zeros(10,1,52,12)
+    from data import WavDataset
+    pos_set = WavDataset("val_pos_set.txt")
+    neg_set = WavDataset("val_neg_set.txt")
+    for i in range(5):
+        data, label = pos_set[i]
+        data = torch.tensor(data)
+        x[i] = data
+    for i in range(5, 10):
+        data, label = neg_set[i]
+        data = torch.tensor(data)
+        x[i] = data
 
-    math_net = MathNet(net)
+    # math_net = MathNet(net)
     golden = net.forward(x)
 
-    x1 = net.relu1(net.fc1(net.quant(x)))
-    x2 = net.relu2(net.fc2(x1))
-    x3 = net.relu3(net.fc3(x2))
-    x4 = net.fc4(x3)
-    x1 = x1.int_repr()
-    x2 = x2.int_repr()
-    x3 = x3.int_repr()
-    # out1, out2, out3, out4 = math_net.forward(x)
-    out = math_net.forward(x)
-    out2 = math_net.forward2(x)
-    # print(f"Golden: {x4.int_repr()}")
+    # x1 = net.relu1(net.fc1(net.quant(x)))
+    # x2 = net.relu2(net.fc2(x1))
+    # x3 = net.relu3(net.fc3(x2))
+    # x4 = net.fc4(x3)
+    # x1 = x1.int_repr()
+    # x2 = x2.int_repr()
+    # x3 = x3.int_repr()
+    # # out1, out2, out3, out4 = math_net.forward(x)
+    # out = math_net.forward(x)
+    # out2 = math_net.forward2(x)
+    # # print(f"Golden: {x4.int_repr()}")
+    # print(f"Golden: {golden}")
+    # print(f"Out:    {out}")
+    # print(f"Out2:   {out2}")
+    # print(f"Out dq: {math_net.dequantize(out2)}")
+
+    x1 = net.pool1(net.relu1(net.conv1(net.quant(x))))
+    x1a = net.relu2(net.conv2b(net.conv2a(x1)))
+    x2 = net.pool2(x1a)
+    out = net.fc1(net.flatten(x2))
     print(f"Golden: {golden}")
-    print(f"Out:    {out}")
-    print(f"Out2:   {out2}")
-    print(f"Out dq: {math_net.dequantize(out2)}")
+    print(f"Out dq: {out.int_repr()}")
+    print(f"conv1 out")
+    # print(net.relu1(net.conv1(net.quant(x)))[0,0,0].int_repr()-net.conv1.zero_point)
+    golden_conv1 = net.conv1(net.quant(x))[0].int_repr().to(torch.int32).flatten() - net.conv1.zero_point
+
+    def check():
+        vals = []
+        count = 0
+        with open("src/run.txt") as f:
+            for l in f.readlines():
+                if not l.startswith("Acc") and not l.startswith("Out"):
+                    for n in [int(w.strip()) for w in l.split()]:
+                        vals.append(n)
+        idx = 0
+        ch = 0
+        row = 0
+        col = 0
+        for v, g in zip(vals, golden_conv1):
+            if v!=g:
+                print(v, g, idx, ch, row, col)
+                count += 1
+            idx += 1
+            col += 1
+            if col == 12:
+                col = 0
+                row += 1
+            if row == 52:
+                row = 0
+                ch += 1
+        print (count)
+        return vals
+    print(net.conv1(net.quant(x))[0,0,0:5].int_repr().to(torch.int16) - net.conv1.zero_point)
+    print(x1a[0,0,0:5].int_repr().to(torch.int16) - net.conv2a.zero_point)
 
     # t= torch.randn(5,64)
     # t = net.quant(t)
@@ -285,23 +352,33 @@ if __name__ == "__main__":
     # Dump model params as C decl
     if True:
         with open("src/model_dump.h", "w") as f:
-            f.write(dump_params_array(math_net.fc1, "fc1"))
+            # f.write(dump_params_array(math_net.fc1, "fc1"))
+            # f.write("\n")
+            # f.write(dump_params_array(math_net.fc2, "fc2"))
+            # f.write("\n")
+            # f.write(dump_params_array(math_net.fc3, "fc3"))
+            # f.write("\n")
+            # f.write(dump_params_array(math_net.fc4, "fc4"))
+            # f.write("\n")]
+            conv1, conv2a, conv2b, fc1 = dump_params_conv(net)
+            f.write(dump_params_array(conv1, "conv1"))
             f.write("\n")
-            f.write(dump_params_array(math_net.fc2, "fc2"))
+            f.write(dump_params_array(conv2a, "conv2a"))
             f.write("\n")
-            f.write(dump_params_array(math_net.fc3, "fc3"))
+            f.write(dump_params_array(conv2b, "conv2b"))
             f.write("\n")
-            f.write(dump_params_array(math_net.fc4, "fc4"))
-            f.write("\n")
+            f.write(dump_params_array(fc1, "fc1"))
+
 
     # create test vectors
-    if False:
-        xq = quantize_x(x, math_net.in_scale, math_net.in_zero_point)
-        x_str = f"int16_t x[{xq.size(0)}][{xq.size(1)}] = {{\n"
+    if True:
+        xq = quantize_x(x, net.quant.scale, net.quant.zero_point)
+        # xq = net.quant(x).int_repr().to(torch.int16) - net.quant.zero_point
+        x_str = f"int16_t x[{xq.size(0)}][{xq.numel()//xq.size(0)}] = {{\n"
         for row in xq:
             count = 0
             x_str += "  {\n"
-            for col in row:
+            for col in row.flatten():
                 if count == 0:
                     x_str += "    "
                 x_str += f"{col.item():5},"
@@ -312,7 +389,7 @@ if __name__ == "__main__":
                     count += 1
             x_str += "\n  },\n"
         x_str += "\n};\n"
-        y = out2
+        y = out.int_repr()
         y_str = f"int16_t y[{y.size(0)}] = {{"
         for col in y:
             if count == 0:

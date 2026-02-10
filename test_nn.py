@@ -1,27 +1,31 @@
 import torch
-from nn import Net, validate, fuse_module, quantize
+from nn import ConvNet, Net, validate, fuse_module, quantize
 from torch.utils.data import DataLoader
 from torch.ao import quantization as quant
 import time
 from test import MathNet
 from data import WavDataset
 
+QAT = True
+
 if __name__ == "__main__":
-    PATH = "model_after_prepare_qat.pth"
     # PATH = "model_after_prepare_qat.pth"
-    # PATH = "out/model_final.pth"
+    # PATH = "model_after_prepare_qat.pth"
+    PATH = "out/model_iter1.pth"
     net = Net()
     nets = []
     for i in range(1):
-        net = Net()
+        net = ConvNet()
         # first are fp32 models
         # next are QAT models
-        quant.prepare_qat(net, inplace=True)
+        if QAT:
+            quant.prepare_qat(net, inplace=True)
         net.load_state_dict(torch.load(PATH, weights_only=True))
         # net.load_state_dict(torch.load(f"out/model_iter{i}.pth", weights_only=True))
-        fuse_module(net)
-        quantize(net)
-        nets.append(MathNet(net))
+        if QAT:
+            fuse_module(net)
+            quantize(net)
+        nets.append(net)
         net.eval()
 
 #    math_net = MathNet(net)
@@ -38,7 +42,7 @@ if __name__ == "__main__":
                              num_workers=4,
                              prefetch_factor=2,
                              )
-    THRESHOLD = [0.5, 0.6, 0.7, 0.75, 0.8]
+    THRESHOLD = [0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8]
 
     time.sleep(5)
     # print("=====================================")

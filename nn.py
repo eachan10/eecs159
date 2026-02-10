@@ -65,12 +65,16 @@ class ConvNet(nn.Module):
         self.qconfig = quant.get_default_qat_qconfig("qnnpack")
         self.quant = quant.QuantStub()
         self.dequant = quant.DeQuantStub()
+        self.relu = nn.ReLU()
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.relu3 = nn.ReLU()
+
         # conv
 
         # input (batch, 1, 52, 12)
-        # output (batch, 16, 52, 12)
+        # output (batch, 32, 52, 12)
         self.conv1 = nn.Conv2d(in_channels=1,
-                            #    out_channels=16,
                                out_channels=32,
                                kernel_size=3,
                                stride=1,
@@ -78,15 +82,13 @@ class ConvNet(nn.Module):
                                groups=1,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(32)
-        # self.bn1 = nn.BatchNorm2d(16)
-        self.relu = nn.ReLU()
-        # input (batch, 16, 52, 12)
-        # output (batch, 16, 26, 12)
-        self.pool1 = nn.MaxPool2d(kernel_size=(2, 1))
-        # input (batch, 16, 26, 12)
+
+        # input (batch, 32, 52, 12)
         # output (batch, 32, 26, 12)
-        # self.conv2 = nn.Conv2d(in_channels=16,
-                            #    out_channels=32,
+        self.pool1 = nn.MaxPool2d(kernel_size=(2, 1))
+
+        # input (batch, 32, 26, 12)
+        # output (batch, 64, 26, 12)
         self.conv2 = nn.Conv2d(in_channels=32,
                                out_channels=64,
                                kernel_size=3,
@@ -94,40 +96,153 @@ class ConvNet(nn.Module):
                                padding=1,
                                bias=False)
         self.bn2 = nn.BatchNorm2d(64)
-        # self.bn2 = nn.BatchNorm2d(32)
 
-        # input (batch, 32, 26, 12)
-        # output (batch, 32, 13, 6)
+        # input (batch, 64, 26, 12)
+        # output (batch, 64, 13, 6)
         self.pool2 = nn.MaxPool2d(kernel_size=2)
 
-        # input (batch, 32, 13, 6)
-        # output (batch, 32, 1, 1)
+        self.conv3 = nn.Conv2d(in_channels=64,
+                               out_channels=128,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                               bias=False)
+        # input (batch, 64, 13, 6)
+        # output (batch, 64, 13, 6)
+        self.pool2 = nn.MaxPool2d(kernel_size=2)
+
+        self.conv3 = nn.Conv2d(in_channels=64,
+                               out_channels=128,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                               bias=False)
+        self.bn3 = nn.BatchNorm2d(128)
+
+        # input (batch, 128, 13, 6)
+        # output (batch, 128, 1, 1)
         self.pool3 = nn.AvgPool2d((13,6))
         # classiffier
         self.flatten = nn.Flatten() # -> 32 * 13 * 6
-        # self.fc1 = nn.Linear(64 * 13 * 6, 64)
-        self.fc1 = nn.Linear(64, 1)
-        # self.fc1 = nn.Linear(32 * 13 * 6, 64)
-        # self.drop1 = nn.Dropout(0.2)
-        # self.fc2 = nn.Linear(128, 1)
-        # self.fc2 = nn.Linear(64, 1)
-    
+        self.drop1 = nn.Dropout(0.2)
+        self.fc1 = nn.Linear(128, 1)
+
     def forward(self, x):
         x = self.quant(x)
         x = self.conv1(x)
         x = self.bn1(x)
-        x = self.relu(x)
+        x = self.relu1(x)
         x = self.pool1(x)
         x = self.conv2(x)
         x = self.bn2(x)
-        x = self.relu(x)
+        x = self.relu2(x)
         x = self.pool2(x)
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = self.relu3(x)
         x = self.pool3(x)
         x = self.flatten(x)
+        x = self.drop1(x)
         x = self.fc1(x)
-        # x = self.drop1(x)
-        # x = self.relu(x)
-        # x = self.fc2(x)
+        x = self.dequant(x)
+        return x
+
+class DSConvNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.qconfig = quant.get_default_qat_qconfig("qnnpack")
+        self.quant = quant.QuantStub()
+        self.dequant = quant.DeQuantStub()
+        self.relu = nn.ReLU()
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.relu3 = nn.ReLU()
+
+        # conv
+
+        # input (batch, 1, 52, 12)
+        # output (batch, 32, 52, 12)
+        self.conv1 = nn.Conv2d(in_channels=1,
+                               out_channels=16,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                               groups=1,
+                               bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+
+        # input (batch, 32, 52, 12)
+        # output (batch, 32, 26, 12)
+        self.pool1 = nn.MaxPool2d(kernel_size=(2, 1))
+
+        # input (batch, 32, 26, 12)
+        # output (batch, 64, 26, 12)
+        self.conv2a = nn.Conv2d(in_channels=16,
+                               out_channels=16,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                               groups=16,
+                               bias=False)
+        self.conv2b = nn.Conv2d(in_channels=16,
+                                out_channels=32,
+                                kernel_size=1,
+                                stride=1,
+                                padding=0,
+                                bias=False)
+        self.bn2 = nn.BatchNorm2d(32)
+
+        # input (batch, 64, 26, 12)
+        # output (batch, 64, 13, 6)
+        self.pool2 = nn.AvgPool2d(kernel_size=(13, 6))
+        # self.pool2 = nn.MaxPool2d(kernel_size=2)
+
+        # self.conv3a = nn.Conv2d(in_channels=32,
+        #                         out_channels=32,
+        #                         kernel_size=3,
+        #                         stride=1,
+        #                         padding=1,
+        #                         groups=32,
+        #                         bias=False)
+        # self.conv3b = nn.Conv2d(in_channels=32,
+        #                         out_channels=64,
+        #                         kernel_size=1,
+        #                         stride=1,
+        #                         padding=1,
+        #                         bias=False)
+        # input (batch, 64, 13, 6)
+        # output (batch, 64, 13, 6)
+        # self.bn3 = nn.BatchNorm2d(64)
+
+        # input (batch, 128, 13, 6)
+        # output (batch, 128, 1, 1)
+        # self.pool3 = nn.AvgPool2d((13,6))
+
+        # avg pooled (64x26x12) to (64x2x2)
+        # classiffier
+        self.flatten = nn.Flatten() # -> 32x2x2
+        self.drop1 = nn.Dropout(0.2)
+        self.fc1 = nn.Linear(128, 1)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.pool1(x)
+        x = self.conv2a(x)
+        x = self.conv2b(x)
+        x = self.bn2(x)
+        x = self.relu2(x)
+        x = self.pool2(x)
+        # x = self.conv3a(x)
+        # x = self.conv3b(x)
+        # x = self.bn3(x)
+        # x = self.relu3(x)
+        # x = self.pool3(x)
+        x = self.flatten(x)
+        x = self.drop1(x)
+        x = self.fc1(x)
         x = self.dequant(x)
         return x
 
@@ -150,7 +265,9 @@ def validate(nets, threshold, data_loader):
             wavs, labels = data
             for idx, n in enumerate(nets):
                 outputs = n(wavs)
-                loss = criterion(outputs, labels.float().unsqueeze(1))
+                y = labels.float().unsqueeze(1)
+                soft_labels = y * (1 - 0.05) + (1 - y) * 0.05
+                loss = criterion(outputs, y)
                 losses[idx] += loss
                 sig = torch.sigmoid(outputs[:,0])
                 for i, t in enumerate(threshold):
@@ -188,7 +305,9 @@ def train_loop(net, lr, w, loader):
         inputs, labels = data
         optimizer.zero_grad()
         outputs = net(inputs)
-        loss = criterion(outputs, labels.float().unsqueeze(1))
+        y = labels.float().unsqueeze(1)
+        soft_labels = y * (1 - 0.05) + (1 - y) * 0.05
+        loss = criterion(outputs, soft_labels)
         loss.backward()
         optimizer.step()
 
@@ -206,12 +325,19 @@ def fuse_module(net):
     # net = quant.fuse_modules(net, [['fc1','bn1','relu1'],
                                 #    ['fc2','bn2','relu2'],
                                 #    ['fc3','bn3','relu3']])
-    net.fc1 = torch.nn.utils.fuse_linear_bn_eval(net.fc1, net.bn1)
-    net.bn1 = torch.nn.Identity()
-    net.fc2 = torch.nn.utils.fuse_linear_bn_eval(net.fc2, net.bn2)
-    net.bn2 = torch.nn.Identity()
-    net.fc3 = torch.nn.utils.fuse_linear_bn_eval(net.fc3, net.bn3)
-    net.bn3 = torch.nn.Identity()
+    if type(net) is Net:
+        net.fc1 = torch.nn.utils.fuse_linear_bn_eval(net.fc1, net.bn1)
+        net.bn1 = torch.nn.Identity()
+        net.fc2 = torch.nn.utils.fuse_linear_bn_eval(net.fc2, net.bn2)
+        net.bn2 = torch.nn.Identity()
+        net.fc3 = torch.nn.utils.fuse_linear_bn_eval(net.fc3, net.bn3)
+        net.bn3 = torch.nn.Identity()
+    elif type(net) is DSConvNet:
+        modules_to_fuse = [ ['conv1', 'bn1'], ['conv2b', 'bn2']]
+        net.conv1 = torch.nn.utils.fuse_conv_bn_eval(net.conv1, net.bn1)
+        net.bn1 = torch.nn.Identity()
+        net.conv2b = torch.nn.utils.fuse_conv_bn_eval(net.conv2b, net.bn2)
+        net.bn2 = torch.nn.Identity()
 
 def quantize(net):
     quant.convert(net, inplace=True)
