@@ -43,6 +43,28 @@ def augment(audio: AudioSegment, noise):
     else:
         return noise_slice.overlay(audio[-timeshift:], gain_during_overlay=noise_gain)
 
+def zero_p(audio: AudioSegment):
+    frame_len = 25
+    rms = [audio[idx:idx+400].rms for idx in range(0, len(audio), frame_len)]
+    peak = max(rms)
+    thres = peak // 5
+    word_middle = rms.index(peak)
+    # find index after middle where word ends
+    for i in range(word_middle, len(rms)):
+        if rms[i] <= thres:
+            break
+    i -= 3
+    if i < 0: i = 0
+    clip = audio[:i*frame_len].fade_out(50) #+ AudioSegment.silent(duration=1000-i*frame_len, frame_rate=16000)
+    clip.export("output.wav", format="wav")
+    return rms
+
+def main2():
+    import random
+    with open("val_pos_set.txt") as f:
+        fps = [l.strip() for l in f.readlines() if len(l)>5]
+    aud = AudioSegment.from_file(f"speech-data/{random.choice(fps)}") 
+    print(zero_p(aud))
 
 def main():
     noise = []
