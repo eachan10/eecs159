@@ -38,6 +38,7 @@ def check():
 def conv2d(inp, weight):
     # padding = 1
     # inp is shape (ch, row, col)
+    out = torch.zeros((weight.size(0), inp.size(1), inp.size(2))).to(torch.int32)
     for out_channel in range(weight.size(0)):
         for out_row in range(inp.size(1)):
             for out_col in range(inp.size(2)):
@@ -48,8 +49,11 @@ def conv2d(inp, weight):
                             in_row = out_row + ker_row - 1
                             in_col = out_col + ker_col - 1
 
-                            if (in_row >= 0 and in_row < inp.size(1)):
-                                pass
+                            if (in_row >= 0 and in_row < inp.size(1) and in_col >= 0 and in_col < inp.size(2)):
+                                acc += weight[out_channel, in_channel, ker_row, ker_col] * inp[in_channel, in_row, in_col]
+                out[out_channel, out_row, out_col] = acc
+    return out
+                
 
 
 if __name__ == "__main__":
@@ -100,9 +104,22 @@ if __name__ == "__main__":
         out_conv1[:,ch] += conv1_params["bias"][ch]
     out_conv1 *= conv1_params["acc_scale"]
     out_conv1 >>= conv1_params["shift"]
+
+    # this removes the batch size dimension from input tensor
+    # input is (1, 52, 12) in channel, rows, cols
+    # weights is (16, 1, 52, 12) out channel, in channel, rows, cols
+    out_conv1a = conv2d(xq[0].int_repr().to(torch.int32) - xq.q_zero_point(), conv1_params["weight"].to(torch.int32))
+    for ch in range(out_conv1a.size(0)):
+        out_conv1a[:,ch] += conv1_params["bias"][ch]
+    out_conv1a *= conv1_params["acc_scale"]
+    out_conv1a >>= conv1_params["shift"]
     # out_conv1 += conv1_params["output_zero_point"]
+    print("Golden")
     print(golden_conv1[0,0,0])
+    print("Torch functional conv2d")
     print(out_conv1[0,0,0])
+    print("Manaul conv2d")
+    print(out_conv1a[0,0])
     with open("src/model_dump.h", "w") as f:
         f.write(dump_params_array(conv1_params, "conv1"))
         f.write(dump_params_array(conv2_params, "conv2"))
