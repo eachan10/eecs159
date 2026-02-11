@@ -8,18 +8,16 @@ import numpy as np
 from test import MathNet
 
 if __name__ == "__main__":
-    net = nn.Net()
+    net = nn.ConvNet()
     # net.load_state_dict(torch.load("out/model_iter0.pth", weights_only=True))
     if True:
         quant.prepare_qat(net, inplace=True)
-        net.load_state_dict(torch.load("out/model_iter0.pth", weights_only=True))
+        net.load_state_dict(torch.load("out-cnn-32-64-128-fc1/model_iter9.pth", weights_only=True))
         nn.quantize(net)
         net.eval()
-        math_net = MathNet(net)
     else:
         net.eval()
         net.load_state_dict(torch.load("model.pth", weights_only=True))
-    mfcc_inst = MFCC()
 
     if True:
         audio = pyaudio.PyAudio()
@@ -27,28 +25,29 @@ if __name__ == "__main__":
                                 channels=1,
                                 format=pyaudio.paInt16,
                                 input=True,
-                                frames_per_buffer=512)
-        frames = np.zeros((nn.FRAMES_PER_SEC, nn.COEF_PER_FRAME), dtype=np.float32)
+                                frames_per_buffer=300)
+        # frames = np.zeros((nn.FRAMES_PER_SEC, nn.COEF_PER_FRAME), dtype=np.float32)
+        audio = np.zeros(16000)
         print("Starting")
         print("Nothing     ", end='')
         last = False
         timestamp = 0
         pred_count = 0
         while True:
-            aud = mic_stream.read(512)
+            aud = mic_stream.read(300)
             new_frame = np.frombuffer(aud, dtype=np.int16)
-            frames[:-1] = frames[1:]
+            audio[:-300] = audio[300:]
+            audio[-300:] = new_frame
             # frames[-1] = mfcc_inst(new_frame)
-            frames[-1] = mfcc(new_frame)
-            features = torch.tensor(frames.flatten()).unsqueeze(0)
+            audio_frames = prepare_data(audio)
+            features = np.expand_dims(process_frames(audio_frames), axis=0)  # adds channel
+            features = torch.tensor(features).unsqueeze(0)  # adds batch
             with torch.no_grad():
-                # out = net(features)
-                out = math_net(features)
+                out = net(features)
+                # out = math_net(features)
                 pred = torch.sigmoid(out).item()
             # print(pred, pred > 0.9)
-            if np.isnan(frames).any():
-                break
-            if pred > 0.7:
+            if pred > 0.5:
                 pred_count += 1
             else:
                 pred_count = 0
