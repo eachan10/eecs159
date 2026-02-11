@@ -2,13 +2,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <math.h>
+#include <time.h>
 #include "model_dump.h"
 #include "test_vec.h"
+
 
 // inputs: x, x_scale, x_zero_point, weight, weight_scale, weight_zero_point
 //         bias, output_scale, output_zero_point
 
-void linear(int16_t *x, int16_t *w, int32_t *b, int16_t *out,
+void linear(int32_t *x, int32_t *w, int32_t *b, int32_t *out,
             int32_t acc_scale, int32_t shift, int32_t output_zero_point,
             int input_dim, int output_dim) {
   for (int i = 0; i < output_dim; i++) {
@@ -27,14 +29,18 @@ void linear(int16_t *x, int16_t *w, int32_t *b, int16_t *out,
   }
 }
 
-void relu(int16_t *x, int dim) {
+void relu(int32_t *x, int dim) {
   for (int i = 0; i < dim; i++) {
     x[i] = x[i] < 0 ? 0 : x[i];
   }
 }
 
-void conv2d(int16_t *x, int16_t *w, int32_t *b, int16_t *out,
-            int32_t acc_scale, int32_t shift, int32_t input_zero_point, int32_t output_zero_point,
+// conv2d(x, conv1_weights, conv1_bias, buf1,
+//          conv1_acc_scale, conv1_shift, conv1_output_zero_point,
+//          52, 12, 1, 32, 3, 3, 1, 1, 0);
+
+void conv2d(int32_t *x, int32_t *w, int32_t *b, int32_t *out,
+            int32_t acc_scale, int32_t shift, int32_t output_zero_point,
             int in_h, int in_w,
             int in_channels, int out_channels,
             int kernel_h, int kernel_w,
@@ -48,7 +54,7 @@ void conv2d(int16_t *x, int16_t *w, int32_t *b, int16_t *out,
     for (int out_r = 0; out_r < output_h; ++out_r) {
       for (int out_c = 0; out_c < output_w; ++out_c) {
         // output_idx = out_ch * output_h * output_w + out_r * output_w + out_c;
-        out[output_idx] = 0;
+        // out[output_idx] = 0;
         int64_t acc = b[out_ch];
 
         for (int in_ch = 0; in_ch < in_channels; ++in_ch) {
@@ -57,9 +63,6 @@ void conv2d(int16_t *x, int16_t *w, int32_t *b, int16_t *out,
             for (int ker_c = 0; ker_c < kernel_w; ++ker_c) {
               int in_r = out_r * stride + ker_r - padding;
               int in_c = out_c * stride + ker_c - padding;
-              // if (output_idx == 9349) {
-              //   printf("out_ch: %d in_r: %d in_c: %d\n", out_ch, in_r, in_c);
-              // }
               int weight_idx;
               
               // padding zeros as zero point
@@ -74,9 +77,6 @@ void conv2d(int16_t *x, int16_t *w, int32_t *b, int16_t *out,
                                 in_ch * kernel_h * kernel_w +
                                 ker_r * kernel_w + ker_c;
                 }
-                // if (output_idx == 9349) {
-                // printf("x: %d w: %d\n", x[input_idx], w[weight_idx]);
-                // } 
                 acc += x[input_idx] * w[weight_idx];
               }
             }
@@ -105,7 +105,7 @@ void conv2d(int16_t *x, int16_t *w, int32_t *b, int16_t *out,
   }
 }
 
-void maxpool2d(int16_t *x, int16_t *out,
+void maxpool2d(int32_t *x, int32_t *out,
                int channels, int in_h, int in_w,
                int kernel_h, int kernel_w) {
   // stride
@@ -137,7 +137,7 @@ void maxpool2d(int16_t *x, int16_t *out,
   }
 }
 
-void avgpool2d(int16_t *x, int16_t *out,
+void avgpool2d(int32_t *x, int32_t *out,
                int channels, int in_h, int in_w,
                int kernel_h, int kernel_w) {
   // stride
@@ -145,6 +145,7 @@ void avgpool2d(int16_t *x, int16_t *out,
   int stride_w = kernel_w;
   int output_h = 1 + (in_h - kernel_h) / stride_h;
   int output_w = 1 + (in_w - kernel_w) / stride_w;
+  int rounding = kernel_h * kernel_w / 2;
 
   for (int ch = 0; ch < channels; ++ch) {
     for (int out_r = 0; out_r < output_h; ++out_r) {
@@ -163,7 +164,7 @@ void avgpool2d(int16_t *x, int16_t *out,
         }
 
         int output_idx = ch * output_h * output_w + out_r * output_w + out_c;
-        out[output_idx] = total / (kernel_h * kernel_w);
+        out[output_idx] = (total + rounding) / (kernel_h * kernel_w);
       }
     }
   }
@@ -183,52 +184,76 @@ void avgpool2d(int16_t *x, int16_t *out,
 //   *out = buf2[0];
 // }
 
-void forward_pass2(int16_t *x, int16_t *out) {
+void forward_pass2(int32_t *x, int32_t *out) {
   // alternate input and output buffers
-  int16_t buf1[9984]; // out of conv2b 32 * 26 * 12
-  int16_t buf2[9984]; // out of conv1 16 * 52 * 12
+  int32_t buf1[20000]; // out of conv2b 32 * 26 * 12
+  int32_t buf2[20000]; // out of conv1 16 * 52 * 12
   conv2d(x, conv1_weights, conv1_bias, buf1,
-         conv1_acc_scale, conv1_shift, 163, conv1_output_zero_point,
-         52, 12, 1, 16, 3, 3, 1, 1, 0);
-  // for (int i = 0; i < 12*52*16; i++) {
+         conv1_acc_scale, conv1_shift, conv1_output_zero_point,
+         52, 12, 1, 32, 3, 3, 1, 1, 0);
+  relu(buf1, 52*12*32);
+  // for (int i = 0; i < 12*52*32; i++) {
   //   printf("%d ", buf1[i]);
   //   if ((i+1) % 12 == 0) printf("\n");
   // }
   // printf("\n");
-  relu(buf1, 52*12*16);
-  maxpool2d(buf1, buf2, 16, 52, 12, 2, 1);
-  
-  conv2d(buf2, conv2a_weights, conv2a_bias, buf1,
-         conv2a_acc_scale, conv2a_shift, conv1_output_zero_point, conv2a_output_zero_point,
-         26, 12, 16, 16, 3, 3, 1, 1, 1);
-  conv2d(buf1, conv2b_weights, conv2b_bias, buf2,
-         conv2b_acc_scale, conv2b_shift, conv2a_output_zero_point, conv2b_output_zero_point,
-         26, 12, 16, 32, 1, 1, 1, 1, 0);
-  relu(buf2, 26*12*32);
-  // for (int i = 0; i < 12*5; i++) {
+  maxpool2d(buf1, buf2, 32, 52, 12, 2, 1);
+  // for (int i = 0; i < 12*26*32; i++) {
   //   printf("%d ", buf2[i]);
   //   if ((i+1) % 12 == 0) printf("\n");
   // }
   // printf("\n");
-  avgpool2d(buf2, buf1, 32, 26, 12, 13, 6);
   
-  linear(buf1, fc1_weights, fc1_bias, buf2, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128, 1);
-  *out = buf2[0];
+  conv2d(buf2, conv2_weights, conv2_bias, buf1,
+         conv2_acc_scale, conv2_shift, conv2_output_zero_point,
+         26, 12, 32, 64, 3, 3, 1, 1, 0);
+  relu(buf1, 26*12*64);
+  maxpool2d(buf1, buf2, 64, 26, 12, 2, 2);
+
+  // for (int i = 0; i < 6*13*64; i++) {
+  //   printf("%d ", buf2[i]);
+  //   if ((i+1) % 12 == 0) printf("\n");
+  // }
+  // printf("\n");
+
+  conv2d(buf2, conv3_weights, conv3_bias, buf1,
+         conv3_acc_scale, conv3_shift, conv3_output_zero_point,
+         13, 6, 64, 128, 3, 3, 1, 1, 0);
+  relu(buf1, 13*6*128);
+  // for (int i = 0; i < 6*13*128; i++) {
+  //   printf("%d ", buf2[i]);
+  //   if ((i+1) % 12 == 0) printf("\n");
+  // }
+  // printf("\n");
+  avgpool2d(buf1, buf2, 128, 13, 6, 13, 6);
+  // for (int i = 0; i < 128; i++) {
+  //   printf("%d ", buf2[i]);
+  //   if ((i+1) % 12 == 0) printf("\n");
+  // }
+  // printf("\n");
+  
+  linear(buf2, fc1_weights, fc1_bias, buf1, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128, 1);
+  *out = buf1[0];
   // *out += fc1_output_zero_point;
 }
 
 
 int main() {
-  int16_t out = 0;
+  int32_t out = 0;
   // printf("Starting...\n");
-
-  for (int i = 0; i < 10; i++) {
+  clock_t begin, end;
+  double time_spent = 0.0;
+  for (int i = 0; i < 100; i++) {
+    begin = clock();
     forward_pass2(x[i], &out);
+    end = clock();
+    time_spent += (double)(end - begin) / CLOCKS_PER_SEC;
     double outf = (double)out * 0.03069;
     double threshold = 0.2;
     double prob = 1 / (1 + exp(-outf));
-    printf("Out[%d]: %d Outf: %f Expected: %d\n", i, out+fc1_output_zero_point, outf, y[i]);
-    printf("Prob: %f Prediction: %d\n", prob, prob > threshold ? 1 : 0);
+    printf("Out[%3d]: %3d Expected: %3d ", i, out, y[i]);
+    printf("Prob: %5f Pred: %d\n", prob, prob > threshold ? 1 : 0);
+    printf("Average Time Per Inference: %f\n", time_spent / 100.0);
   }
   return 0;
 }
