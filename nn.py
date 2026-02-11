@@ -338,6 +338,13 @@ def fuse_module(net):
         net.bn1 = torch.nn.Identity()
         net.conv2b = torch.nn.utils.fuse_conv_bn_eval(net.conv2b, net.bn2)
         net.bn2 = torch.nn.Identity()
+    elif type(net) is ConvNet:
+        net.conv1 = torch.nn.utils.fuse_conv_bn_eval(net.conv1, net.bn1)
+        net.bn1 = torch.nn.Identity()
+        net.conv2 = torch.nn.utils.fuse_conv_bn_eval(net.conv2, net.bn2)
+        net.bn2 = torch.nn.Identity()
+        net.conv3 = torch.nn.utils.fuse_conv_bn_eval(net.conv3, net.bn3)
+        net.bn3 = torch.nn.Identity()
 
 def quantize(net):
     quant.convert(net, inplace=True)
