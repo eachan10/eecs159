@@ -248,12 +248,13 @@ int main() {
     forward_pass2(x[i], &out);
     end = clock();
     time_spent += (double)(end - begin) / CLOCKS_PER_SEC;
-    double outf = (double)out * 0.03069;
-    double threshold = 0.2;
+    // needs fc1 output scale
+    double outf = (double)out * 0.03421637415885925;
+    double threshold = 0.4;
     double prob = 1 / (1 + exp(-outf));
     printf("Out[%3d]: %3d Expected: %3d ", i, out, y[i]);
     printf("Prob: %5f Pred: %d\n", prob, prob > threshold ? 1 : 0);
-    printf("Average Time Per Inference: %f\n", time_spent / 100.0);
   }
+  printf("Average Time Per Inference: %f\n", time_spent / 100.0);
   return 0;
 }
