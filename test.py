@@ -185,7 +185,7 @@ def dump_params_array(params, prefix):
     all_str = []
     # weights 2d matrix
     w : torch.Tensor= params["weight"]
-    w_str = f"int16_t {prefix}_weights[{w.numel()}] = {{\n"
+    w_str = f"int32_t {prefix}_weights[{w.numel()}] = {{\n"
     for idx, row in enumerate(w):
         count = 0
         # w_str += "  {\n"
@@ -374,7 +374,7 @@ if __name__ == "__main__":
     if True:
         xq = quantize_x(x, net.quant.scale, net.quant.zero_point)
         # xq = net.quant(x).int_repr().to(torch.int16) - net.quant.zero_point
-        x_str = f"int16_t x[{xq.size(0)}][{xq.numel()//xq.size(0)}] = {{\n"
+        x_str = f"int32_t x[{xq.size(0)}][{xq.numel()//xq.size(0)}] = {{\n"
         for row in xq:
             count = 0
             x_str += "  {\n"
@@ -390,7 +390,7 @@ if __name__ == "__main__":
             x_str += "\n  },\n"
         x_str += "\n};\n"
         y = out.int_repr()
-        y_str = f"int16_t y[{y.size(0)}] = {{"
+        y_str = f"int32_t y[{y.size(0)}] = {{"
         for col in y:
             if count == 0:
                 y_str += "  "
