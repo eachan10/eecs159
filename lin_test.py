@@ -110,7 +110,7 @@ if __name__ == "__main__":
     # weights is (16, 1, 52, 12) out channel, in channel, rows, cols
     out_conv1a = conv2d(xq[0].int_repr().to(torch.int32) - xq.q_zero_point(), conv1_params["weight"].to(torch.int32))
     for ch in range(out_conv1a.size(0)):
-        out_conv1a[:,ch] += conv1_params["bias"][ch]
+        out_conv1a[ch] += conv1_params["bias"][ch]
     out_conv1a *= conv1_params["acc_scale"]
     out_conv1a >>= conv1_params["shift"]
     # out_conv1 += conv1_params["output_zero_point"]
