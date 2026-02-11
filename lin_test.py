@@ -37,6 +37,10 @@ if __name__ == "__main__":
     
     def test(idx):
         return quantized_linear_c(fc1_params, x4[idx:idx+1].int_repr() - x4.q_zero_point())
+    test_out =[]
+    for i in range(10):
+        test_out.append(test(i).item())
+    print(test_out)
     with open("src/model_lin.h", "w") as f:
         f.write(dump_params_array(fc1_params, "fc1"))
 
