@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch
 import re
 
-def check():
+def check(golden):
     vals = []
     count = 0
     with open("src/run.txt", encoding='utf-16') as f:
@@ -20,16 +20,17 @@ def check():
     ch = 0
     row = 0
     col = 0
-    for v, g in zip(vals, golden_conv1.flatten()):
+    for v, g in zip(vals, golden.flatten()):
         if abs(v-g) > 1:
             print(v, g, idx, ch, row, col)
             count += 1
+            if count > 10: return
         idx += 1
         col += 1
-        if col == 12:
+        if col == golden.size(2):
             col = 0
             row += 1
-        if row == 52:
+        if row == golden.size(1):
             row = 0
             ch += 1
     print (count)
@@ -66,12 +67,12 @@ if __name__ == "__main__":
 
     pos_set = WavDataset("val_pos_set.txt")
     neg_set = WavDataset("val_neg_set.txt")
-    x = torch.randn((10, 1, 52, 12))
-    for i in range(5):
+    x = torch.randn((100, 1, 52, 12))
+    for i in range(50):
         data, label = pos_set[i]
         data = torch.tensor(data)
         x[i] = data
-    for i in range(5, 10):
+    for i in range(50, 100):
         data, label = neg_set[i]
         data = torch.tensor(data)
         x[i] = data
@@ -113,6 +114,9 @@ if __name__ == "__main__":
         out_conv1a[ch] += conv1_params["bias"][ch]
     out_conv1a *= conv1_params["acc_scale"]
     out_conv1a >>= conv1_params["shift"]
+
+    out_maxpool1 = net.pool1(net.relu1(net.bn1(net.conv1(xq))))
+    golden_pool1 = out_maxpool1.int_repr().to(torch.int32) - out_maxpool1.q_zero_point()
     # out_conv1 += conv1_params["output_zero_point"]
     print("Golden")
     print(golden_conv1[0,0,0])
@@ -128,7 +132,7 @@ if __name__ == "__main__":
 
     with open("src/test_vec.h", "w") as f:
         # test_x = x4.int_repr().to(torch.int32) - x4.q_zero_point()
-        test_x = xq.int_repr().to(torch.int32) - x4.q_zero_point()
+        test_x = xq.int_repr().to(torch.int32) - xq.q_zero_point()
         f.write(f"int32_t x[{test_x.size(0)}][{test_x.numel()//test_x.size(0)}] = {{\n")
         for row in test_x:
             count = 0
