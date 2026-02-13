@@ -253,6 +253,6 @@ int main() {
     printf("Out[%3d]: %4d Expected: %4d ", i, out, y[i]);
     printf("Prob: %5f Pred: %d\n", prob, prob > threshold ? 1 : 0);
   }
-  printf("Average Time Per Inference: %f\n", time_spent / 100.0);
+  printf("Average Time Per Inference: %fms\n", time_spent / 100.0 * 1000.0);
   return 0;
 }
