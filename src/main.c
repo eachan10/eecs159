@@ -192,49 +192,19 @@ void forward_pass2(int32_t *x, int32_t *out) {
          conv1_acc_scale, conv1_shift, conv1_output_zero_point,
          52, 12, 1, 32, 3, 3, 1, 1, 0);
   relu(buf1, 52*12*32);
-  // for (int i = 0; i < 12*52*32; i++) {
-  //   printf("%d ", buf1[i]);
-  //   if ((i+1) % 12 == 0) printf("\n");
-  // }
-  // printf("\n");
   maxpool2d(buf1, buf2, 32, 52, 12, 2, 1);
-  // for (int i = 0; i < 12*26*32; i++) {
-  //   printf("%d ", buf2[i]);
-  //   if ((i+1) % 12 == 0) printf("\n");
-  // }
-  // printf("\n");
-  
   conv2d(buf2, conv2_weights, conv2_bias, buf1,
          conv2_acc_scale, conv2_shift, conv2_output_zero_point,
          26, 12, 32, 64, 3, 3, 1, 1, 0);
   relu(buf1, 26*12*64);
   maxpool2d(buf1, buf2, 64, 26, 12, 2, 2);
-
-  // for (int i = 0; i < 6*13*64; i++) {
-  //   printf("%d ", buf2[i]);
-  //   if ((i+1) % 12 == 0) printf("\n");
-  // }
-  // printf("\n");
-
   conv2d(buf2, conv3_weights, conv3_bias, buf1,
          conv3_acc_scale, conv3_shift, conv3_output_zero_point,
          13, 6, 64, 128, 3, 3, 1, 1, 0);
   relu(buf1, 13*6*128);
-  // for (int i = 0; i < 6*13*128; i++) {
-  //   printf("%d ", buf2[i]);
-  //   if ((i+1) % 12 == 0) printf("\n");
-  // }
-  // printf("\n");
   avgpool2d(buf1, buf2, 128, 13, 6, 13, 6);
-  // for (int i = 0; i < 128; i++) {
-  //   printf("%d ", buf2[i]);
-  //   if ((i+1) % 12 == 0) printf("\n");
-  // }
-  // printf("\n");
-  
   linear(buf2, fc1_weights, fc1_bias, buf1, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128, 1);
   *out = buf1[0];
-  // *out += fc1_output_zero_point;
 }
 
 
@@ -252,9 +222,9 @@ int main() {
     double outf = (double)out * 0.03421637415885925;
     double threshold = 0.4;
     double prob = 1 / (1 + exp(-outf));
-    printf("Out[%3d]: %3d Expected: %3d ", i, out, y[i]);
-    printf("Prob: %5f Pred: %d\n", prob, prob > threshold ? 1 : 0);
+    printf("Out[%2d]: %4d Expected: %4d ", i, out, y[i]);
+    printf("Prob: %5.2f%% Pred: %d\n", prob * 100, prob > threshold ? 1 : 0);
   }
-  printf("Average Time Per Inference: %f\n", time_spent / 100.0);
+  printf("Average Time Per Inference: %.3fms\n", time_spent / 100.0 * 1000.0);
   return 0;
 }
