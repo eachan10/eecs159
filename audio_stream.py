@@ -34,10 +34,11 @@ if __name__ == "__main__":
         timestamp = 0
         pred_count = 0
         while True:
-            aud = mic_stream.read(300)
-            new_frame = np.frombuffer(aud, dtype=np.int16)
-            audio[:-300] = audio[300:]
-            audio[-300:] = new_frame
+            for i in range(10): # PARAM: number of frames to read before doing new inference
+                aud = mic_stream.read(300)
+                new_frame = np.frombuffer(aud, dtype=np.int16)
+                audio[:-300] = audio[300:]
+                audio[-300:] = new_frame
             # frames[-1] = mfcc_inst(new_frame)
             audio_frames = prepare_data(audio)
             features = np.expand_dims(process_frames(audio_frames), axis=0)  # adds channel
@@ -46,12 +47,11 @@ if __name__ == "__main__":
                 out = net(features)
                 # out = math_net(features)
                 pred = torch.sigmoid(out).item()
-            # print(pred, pred > 0.9)
-            if pred > 0.5:
+            if pred > 0.5:    # PARAM: threshold for sigmoid function - decrease makes more likely to be positive
                 pred_count += 1
             else:
                 pred_count = 0
-            if pred_count > 5:
+            if pred_count > 5: # PARAM: number of consecutive positives needed to detect for actual positive
                 if last == False:
                     print("\rDETECTED           ", end='')
                     last = True
@@ -59,23 +59,3 @@ if __name__ == "__main__":
             elif time() - 1 > timestamp:
                 print(f"\r{out.item():.3f} {pred*100:.2f}%     ", end='')
                 last = False
-    else:
-        audio = load_wav("output.wav")
-        pred = []
-        with torch.no_grad():
-            total_time = 0
-            total = 0
-            for idx in range(0, len(audio)-16000, 1000):
-                total += 1
-                prev = time()
-                frames = prepare_data(audio[idx:])
-                mfcc_data = process_frames(frames, mfcc_inst)
-                # mfcc_data = process_frames(frames, mfcc_inst=None)
-                # print(mfcc_data)
-                features = torch.tensor(mfcc_data).unsqueeze(0)
-                pred.append(torch.sigmoid(net(features)))
-                total_time += time() - prev
-
-        print(f"Avg time: {total_time / total}")
-        pred = [val.item() for val in pred]
-        print(pred)
