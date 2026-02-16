@@ -103,10 +103,10 @@ class PeoplesSpeech:
         for data in ds:
             audio = data["audio"]
             # duration = data["duration_ms"]
-            text = data["text"]
+            text = data["text"].split()
             if audio["sampling_rate"] != 16000:
                 continue
-            if "stop" in text:
+            if "stop" in text or "go" in text:
                 continue
             audio_arr = audio["array"]
             if len(audio_arr) <= 16000: continue
@@ -135,50 +135,6 @@ class PeoplesSpeech:
         ds = ds[self.split]
         ds = ds.shard(shards, idx).shuffle()
         return self._generator(ds)
-
-# class LJSpeechDataset(Dataset):
-#     REPEAT_COUNT = 20
-#     def __init__(self, root_dir):
-#         self.root_dir = root_dir
-#         self.fnames = []
-#         with open(f"{root_dir}/metadata.csv", encoding='utf-8') as f:
-#             for line in f.readlines():
-#                 fname, transcription, _ = line.split("|")
-#                 if "stop" not in transcription:
-#                     self.fnames.append(fname)
-    
-#     def __len__(self):
-#         return len(self.fnames) * self.REPEAT_COUNT
-    
-#     @lru_cache(maxsize=512)
-#     def get_audio_from_idx(self, idx):
-#         fpath = f"{self.root_dir}/wavs/{self.fnames[idx]}.wav"
-#         audio = load_wav(fpath, downsample=True)
-#         return audio
-    
-#     def __getitem__(self, idx):
-#         idx = idx % len(self.fnames)
-#         audio = self.get_audio_from_idx(idx)
-#         if len(audio) > 16000:
-#             start_idx = random.randint(0, len(audio) - 16000)
-#         else:
-#             start_idx = 0
-#         label = 0
-#         tries = 0
-#         while 1:
-#             audio_frames = prepare_data(audio[start_idx:])
-#             features = np.zeros((FRAMES_PER_SEC, COEF_PER_FRAME), dtype=np.float32)
-#             for idx, frame in enumerate(audio_frames):
-#                 # features[idx] = self.mfcc(frame)
-#                 features[idx] = mfcc(frame)
-#             if not np.isfinite(features).all():
-#                 if tries < 3:
-#                     tries += 1
-#                     continue
-#                 np.save("audio_frames.npy", audio_frames)
-#                 np.save("features.npy", features)
-#                 raise RuntimeError(f"Input has NaN/Inf from file {fpath}")
-#             return features.flatten(), label
         
 class WavDataset(Dataset):
     def __init__(self, set_path):
@@ -206,7 +162,12 @@ class WavDataset(Dataset):
                                 sample_width=audio.dtype.itemsize,
                                 channels=1)
             audio = np.array(augment(audio, self.noise).get_array_of_samples())
-        label = 1 if fpath.startswith("stop") else 0
+        if fpath.startswith("stop"):
+            label = 1
+        elif fpath.startswith("go"):
+            label = 2
+        else:
+            label = 0
         audio_frames = prepare_data(audio)
         features = np.expand_dims(process_frames(audio_frames), axis=0)
         return features, label

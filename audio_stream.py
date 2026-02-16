@@ -51,7 +51,7 @@ if __name__ == "__main__":
                 pred_count += 1
             else:
                 pred_count = 0
-            if pred_count > 5: # PARAM: number of consecutive positives needed to detect for actual positive
+            if pred_count > 1: # PARAM: number of consecutive positives needed to detect for actual positive
                 if last == False:
                     print("\rDETECTED           ", end='')
                     last = True

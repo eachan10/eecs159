@@ -161,7 +161,7 @@ def layer_params(x_scale, lin):
     curr["bias"]              = b
     curr["output_scale"]      = torch.tensor(lin.scale)
     curr["output_zero_point"] = torch.tensor(lin.zero_point)
-    while (1<<shift)*acc_scale < 10000:
+    while (1<<shift)*acc_scale < 8000:
         shift += 1
         curr["acc_scale"] = torch.round((1<<shift)*acc_scale).to(torch.int32)
     curr["shift"]             = shift
@@ -249,8 +249,8 @@ def quantize_x(x, scale, zero_point):
 def quantized_linear_c(lin: dict, x: torch.tensor):
     # I can ommit the x and output zero points add/sub
     # since I will keep things at int16
-    x_int32 = x.to(torch.int32)
-    w_int32 = lin["weight"].to(torch.int32)
+    x_int32 = x.to(torch.int64)
+    w_int32 = lin["weight"].to(torch.int64)
     acc_int32 = torch.mm(x_int32, w_int32.T)
     acc_int32 += lin["bias"]
     acc_int32 *= lin["acc_scale"]
@@ -258,6 +258,29 @@ def quantized_linear_c(lin: dict, x: torch.tensor):
     acc_int32 >>= lin["shift"]
     acc_int32 = torch.clamp(acc_int32, -lin["output_zero_point"], 255-lin["output_zero_point"]).to(torch.int16)
     return acc_int32
+
+def q_lin_layer(lin, x: torch.tensor):
+    x_int32 = x.int_repr().to(torch.int32)
+    w_int32 = lin.weight().int_repr().to(torch.int32)
+    weight_zero_point = 0
+    zp_x = x.q_zero_point()
+    scale_x = x.q_scale()
+    weight_scale = lin.weight().q_scale()
+    scale_out = lin.scale
+    zero_point_out = lin.zero_point
+    bias = lin.bias() / (x.q_scale() * lin.weight().q_scale())
+    return torch.max(
+        torch.tensor(0).double(),
+        torch.min(
+            torch.tensor(255).double(),
+            torch.round(
+                (torch.nn.functional.linear(
+                    x_int32.double() - zp_x,
+                    w_int32.double() - weight_zero_point
+                ) + bias) * (scale_x * weight_scale) / scale_out
+            ) + zero_point_out
+        )
+    ) - zero_point_out
 
 if __name__ == "__main__":
     net = DSConvNet()

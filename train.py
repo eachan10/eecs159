@@ -1,4 +1,4 @@
-from nn import Net, ConvNet, DSConvNet, train_loop, validate, fuse_module, quantize
+from nn import Net, ConvNet, DSConvNet, ConvNetStopGo, train_loop, validate, validate_stop_go, fuse_module, quantize
 from data import CombinedDataset
 
 import torch
@@ -15,7 +15,7 @@ EPOCH_LENGTH = 10000
 def main():
     os.makedirs("out", exist_ok=True)
     # net = Net()
-    net = DSConvNet()
+    net = ConvNetStopGo()
     if QAT:
         quant.prepare_qat(net, inplace=True)
     # net.load_state_dict(torch.load("out/model_final.pth", weights_only=True))
@@ -61,7 +61,7 @@ def main():
             train_loop(net, lr=lr, w=1, loader=training_data_loader)
             print("Validating...")
             net.eval()
-            validate([net], [0.3,0.4,0.5,0.6,0.7,0.8], validation_data_loader)
+            validate_stop_go([net], validation_data_loader)
             net.train()
             torch.save(net.state_dict(), f"out/model_iter{i}.pth")
     finally:

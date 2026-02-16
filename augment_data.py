@@ -4,6 +4,7 @@ from pydub import AudioSegment
 import random
 import math
 import time
+import os
 
 random.seed(time.time())
 
@@ -55,16 +56,24 @@ def zero_p(audio: AudioSegment):
             break
     i -= 3
     if i < 0: i = 0
-    clip = audio[:i*frame_len].fade_out(50) #+ AudioSegment.silent(duration=1000-i*frame_len, frame_rate=16000)
-    clip.export("output.wav", format="wav")
-    return rms
+    clip = audio[:i*frame_len].fade_out(50) + AudioSegment.silent(duration=1000-i*frame_len, frame_rate=16000)
+    return clip
 
 def main2():
-    import random
-    with open("val_pos_set.txt") as f:
-        fps = [l.strip() for l in f.readlines() if len(l)>5]
-    aud = AudioSegment.from_file(f"speech-data/{random.choice(fps)}") 
-    print(zero_p(aud))
+    os.makedirs("speech-data/not-stop", exist_ok=True)
+    for fp in Path("speech-data/stop").iterdir():
+        if (fp.name.endswith("wav")):
+            clip = zero_p(AudioSegment.from_file(fp, format='wav'))
+            clip.export(f"speech-data/not-stop/{fp.name}", format='wav')
+    # for fp in Path("speech-data/go").iterdir():
+    #     if (fp.name.endswith("wav")):
+    #         clip = zero_p()
+    #         clip.export(f"speech-data/not-go/{fp.name}")
+    #     print(f"speech-data/not-stop/{fp.name}")
+    # with open("val_pos_set.txt") as f:
+    #     fps = [l.strip() for l in f.readlines() if len(l)>5]
+    # aud = AudioSegment.from_file(f"speech-data/{random.choice(fps)}") 
+    # print(zero_p(aud))
 
 def main():
     noise = []
@@ -102,4 +111,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main2()

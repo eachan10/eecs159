@@ -164,7 +164,8 @@ class MFCC:
 # 16kHz 25ms frame is 400 samples
 
 if __name__ == "__main__":
-    audio = load_wav('../output.wav')
+    import librosa
+    audio = load_wav('./test.wav')
     # audio = load_wav("speech-data/go/0a2b400e_nohash_0.wav")
     print(max(audio))
     print(f'{len(audio)=}')
@@ -174,7 +175,11 @@ if __name__ == "__main__":
     for i in range(0, len(audio), 16000):
         audio_frames = prepare_data(audio[i:i+16000])
         for f in audio_frames:
-            out.append(my_mfcc(f))
+            # out.append(my_mfcc(f))
+            out.append(librosa.feature.mfcc(y=f.astype(np.float32) / (1 << 15),
+                                            sr=16000,n_mfcc=12,lifter=22,
+                                            n_fft=512, win_length=512,hop_length=513)
+                                            .flatten())
             out2.append(mfcc(f))
     print(out[0])
     print(out2[0])
@@ -186,9 +191,11 @@ if __name__ == "__main__":
     ax[0].set_ylabel("MFCC Coef")
     ax[0].set_xlabel("Frame Index")
 
-    import python_speech_features
-    out = python_speech_features.mfcc(audio.T, appendEnergy=False, ceplifter=22)
-    im2 = ax[1].imshow(out.T, aspect='auto')
+    # import python_speech_features
+    # out = python_speech_features.mfcc(audio.T, appendEnergy=False, ceplifter=22)
+    
+    
+    im2 = ax[1].imshow(np.array(out).T, aspect='auto')
     # audio, sr = torchaudio.load("speech-data/go/0a2b400e_nohash_0.wav")
     # transform = torchaudio.transforms.MFCC(sample_rate=sr, n_mfcc=12,
                                         #    melkwargs={"n_fft": 512, "hop_length": 400,
@@ -201,4 +208,5 @@ if __name__ == "__main__":
     fig.colorbar(im1, ax=ax[0])
     fig.colorbar(im2, ax=ax[1])
     plt.tight_layout()
-    plt.show()
+    # plt.show()
+    plt.savefig("out.png")

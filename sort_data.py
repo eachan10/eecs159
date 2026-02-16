@@ -64,7 +64,7 @@ def main():
             for p in dir_.iterdir():
                 if not p.name.endswith(".wav"): continue
                 set_choice = which_set(p.name, 20, 0)
-                if dir_.name.startswith("stop"):
+                if dir_.name.startswith("stop") or dir_.name.startswith("go"):
                     if set_choice == "validation":
                         val_pos_f.write(f"{dir_.name}/{p.name}\n")
                     elif set_choice == "testing":
