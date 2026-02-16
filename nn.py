@@ -377,12 +377,12 @@ def validate_stop_go(nets, data_loader):
         print(f"Loss: {losses[idx]/batches}")
         acc = correct[idx]/total
         pos_acc = correct_pos[idx]/total_pos
-        pos_acc2 = correct_pos2[idx]/total_pos
+        pos_acc2 = correct_pos2[idx]/total_pos2
         neg_acc = correct_neg[idx]/total_neg
         print(f""
                 f"Acc: {correct[idx]}/{total} : {acc*100:.2f}% "
                 f"Stop: {correct_pos[idx]}/{total_pos} : {pos_acc*100:.2f}% "
-                f"Go: {correct_pos2[idx]}/{total_pos} : {pos_acc2*100:.2f}% "
+                f"Go: {correct_pos2[idx]}/{total_pos2} : {pos_acc2*100:.2f}% "
                 f"Neg: {correct_neg[idx]}/{total_neg} : {neg_acc*100:.2f}% ")
 
 def validate(nets, threshold, data_loader):
@@ -477,7 +477,7 @@ def fuse_module(net):
         net.bn1 = torch.nn.Identity()
         net.conv2b = torch.nn.utils.fuse_conv_bn_eval(net.conv2b, net.bn2)
         net.bn2 = torch.nn.Identity()
-    elif type(net) is ConvNet:
+    elif type(net) is ConvNet or type(net) is ConvNetStopGo:
         net.conv1 = torch.nn.utils.fuse_conv_bn_eval(net.conv1, net.bn1)
         net.bn1 = torch.nn.Identity()
         net.conv2 = torch.nn.utils.fuse_conv_bn_eval(net.conv2, net.bn2)
