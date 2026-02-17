@@ -1,11 +1,10 @@
 import numpy as np
 from scipy.fft import dct
 from scipy.signal import resample_poly
-import matplotlib.pyplot as plt
 
-import cmsisdsp
-import cmsisdsp.mfcc
-from cmsisdsp.datatype import F32
+# import cmsisdsp
+# import cmsisdsp.mfcc
+# from cmsisdsp.datatype import F32
 
 import wave
 
@@ -73,6 +72,35 @@ def mfcc(signal):
     features:np.ndarray = features[:12] * lift
     return features # only need the lower 12 for audio speech recognition
 
+
+LIFT = 22.0
+LIFT_N = np.arange(12)
+lift = 1 + LIFT/2 * np.sin(np.pi*LIFT_N/LIFT)
+def mfcc_fast(signal, fft_buf=np.zeros(257, dtype=np.complex128),
+                      pow_spec_buf=np.zeros(257, dtype=np.float64),
+                      energy_buf=np.ascontiguousarray(np.zeros(36, dtype=np.float64))):
+    """
+    signal: 512 sample frame
+    fft_buf: fft output 257 length, dtype=float32
+    energy_buf: 36 length, dtype=float32
+    """
+    # mfcc that uses existing buffers
+    COEF = 0.95   # usual range from 0.95 to 0.97
+    s = np.append(signal[0], signal[1:] - COEF * signal[:-1])
+    np.fft.rfft(s, 512, out=fft_buf)
+    np.abs(fft_buf, out=pow_spec_buf, casting="unsafe")
+    # compute the power spectrum
+    pow_spec_buf **= 2
+    pow_spec_buf *= 1.0/512
+    np.dot(pow_spec_buf, filterbanks.T, out=energy_buf)
+
+    # replace zeros with minimum value float so log doesn't fail
+    np.maximum(energy_buf, np.finfo(np.float64).eps, out=energy_buf)
+    np.log(energy_buf, out=energy_buf)
+    features = dct(energy_buf, type=2, axis=0, norm='ortho', overwrite_x=True)
+    features[:12] *= lift
+    return features[:12]
+
 hamming = 0.54 - 0.46 * np.cos(2*np.pi*np.arange(0,400)/(400-1))
 # the number of frames is the len of this range
 # 16000 samples per second for a 1 second clip
@@ -127,86 +155,90 @@ FREQ_MIN = 0
 FREQ_MAX = SAMPLE_RATE // 2
 N_MEL_FILTERS = 36
 
-class MFCC:
-    def __init__(self):
-        self.sample_rate = 16000
-        self.fft_size = 512
-        self.n_dct_outputs = 12
-        self.freq_min = 40
-        self.freq_high = self.sample_rate // 2
-        self.n_mel_filters = 26
-        self.window = hamming
+# class MFCC:
+#     def __init__(self):
+#         self.sample_rate = 16000
+#         self.fft_size = 512
+#         self.n_dct_outputs = 12
+#         self.freq_min = 40
+#         self.freq_high = self.sample_rate // 2
+#         self.n_mel_filters = 26
+#         self.window = hamming
         
-    def __call__(self, frame):
-        '''Frame must be a 512 length np array of f32'''
-        self.mfccf32 = cmsisdsp.arm_mfcc_instance_f32()
-        self.filtLen, self.filtPos, self.packedFilters = cmsisdsp.mfcc.melFilterMatrix(F32,
-                                                               self.freq_min,
-                                                               self.freq_high,
-                                                               self.n_mel_filters,
-                                                               self.sample_rate,
-                                                               self.fft_size)
-        self.dctMatrixFilters = cmsisdsp.mfcc.dctMatrix(F32,
-                                          self.n_dct_outputs,
-                                          self.n_mel_filters)
-        status = cmsisdsp.arm_mfcc_init_f32(self.mfccf32,
-                                            self.fft_size,
-                                            self.n_mel_filters,
-                                            self.n_dct_outputs,
-                                            self.dctMatrixFilters,
-                                            self.filtPos, self.filtLen, self.packedFilters, self.window)
-        assert status == 0
-        frame = pre_emphasis(frame)
-        tmp_nb = cmsisdsp.arm_mfcc_tmp_buffer_size(F32, self.fft_size,1)
-        tmp = np.zeros(tmp_nb, dtype=np.float32)
-        res = cmsisdsp.arm_mfcc_f32(self.mfccf32, frame, tmp)
-        return res
+#     def __call__(self, frame):
+#         '''Frame must be a 512 length np array of f32'''
+#         self.mfccf32 = cmsisdsp.arm_mfcc_instance_f32()
+#         self.filtLen, self.filtPos, self.packedFilters = cmsisdsp.mfcc.melFilterMatrix(F32,
+#                                                                self.freq_min,
+#                                                                self.freq_high,
+#                                                                self.n_mel_filters,
+#                                                                self.sample_rate,
+#                                                                self.fft_size)
+#         self.dctMatrixFilters = cmsisdsp.mfcc.dctMatrix(F32,
+#                                           self.n_dct_outputs,
+#                                           self.n_mel_filters)
+#         status = cmsisdsp.arm_mfcc_init_f32(self.mfccf32,
+#                                             self.fft_size,
+#                                             self.n_mel_filters,
+#                                             self.n_dct_outputs,
+#                                             self.dctMatrixFilters,
+#                                             self.filtPos, self.filtLen, self.packedFilters, self.window)
+#         assert status == 0
+#         frame = pre_emphasis(frame)
+#         tmp_nb = cmsisdsp.arm_mfcc_tmp_buffer_size(F32, self.fft_size,1)
+#         tmp = np.zeros(tmp_nb, dtype=np.float32)
+#         res = cmsisdsp.arm_mfcc_f32(self.mfccf32, frame, tmp)
+#         return res
 # 16kHz 25ms frame is 400 samples
 
 if __name__ == "__main__":
-    import librosa
-    audio = load_wav('./test.wav')
-    # audio = load_wav("speech-data/go/0a2b400e_nohash_0.wav")
-    print(max(audio))
-    print(f'{len(audio)=}')
-    out = []
-    out2 = []
-    my_mfcc = MFCC()
-    for i in range(0, len(audio), 16000):
-        audio_frames = prepare_data(audio[i:i+16000])
-        for f in audio_frames:
-            # out.append(my_mfcc(f))
-            out.append(librosa.feature.mfcc(y=f.astype(np.float32) / (1 << 15),
-                                            sr=16000,n_mfcc=12,lifter=22,
-                                            n_fft=512, win_length=512,hop_length=513)
-                                            .flatten())
-            out2.append(mfcc(f))
-    print(out[0])
-    print(out2[0])
-    print("MFCC done")
-    fig, ax = plt.subplots(1, 2)
-    for_plot = np.array(out2)
-    print(for_plot.shape)
-    im1 = ax[0].imshow(for_plot.T, aspect='auto')
-    ax[0].set_ylabel("MFCC Coef")
-    ax[0].set_xlabel("Frame Index")
+    inp = np.random.random(512)
+    print(mfcc_fast(inp))
+    print(mfcc(inp))
+    # import matplotlib.pyplot as plt
+    # import librosa
+    # audio = load_wav('./test.wav')
+    # # audio = load_wav("speech-data/go/0a2b400e_nohash_0.wav")
+    # print(max(audio))
+    # print(f'{len(audio)=}')
+    # out = []
+    # out2 = []
+    # my_mfcc = MFCC()
+    # for i in range(0, len(audio), 16000):
+    #     audio_frames = prepare_data(audio[i:i+16000])
+    #     for f in audio_frames:
+    #         # out.append(my_mfcc(f))
+    #         out.append(librosa.feature.mfcc(y=f.astype(np.float32) / (1 << 15),
+    #                                         sr=16000,n_mfcc=12,lifter=22,
+    #                                         n_fft=512, win_length=512,hop_length=513)
+    #                                         .flatten())
+    #         out2.append(mfcc(f))
+    # print(out[0])
+    # print(out2[0])
+    # print("MFCC done")
+    # fig, ax = plt.subplots(1, 2)
+    # for_plot = np.array(out2)
+    # print(for_plot.shape)
+    # im1 = ax[0].imshow(for_plot.T, aspect='auto')
+    # ax[0].set_ylabel("MFCC Coef")
+    # ax[0].set_xlabel("Frame Index")
 
-    # import python_speech_features
-    # out = python_speech_features.mfcc(audio.T, appendEnergy=False, ceplifter=22)
+    # # import python_speech_features
+    # # out = python_speech_features.mfcc(audio.T, appendEnergy=False, ceplifter=22)
     
     
-    im2 = ax[1].imshow(np.array(out).T, aspect='auto')
-    # audio, sr = torchaudio.load("speech-data/go/0a2b400e_nohash_0.wav")
-    # transform = torchaudio.transforms.MFCC(sample_rate=sr, n_mfcc=12,
-                                        #    melkwargs={"n_fft": 512, "hop_length": 400,
-                                                    #   "n_mels": 26})
-    # out = transform(audio)
-    # im2 = ax[1].imshow(out[0], aspect='auto')
-    ax[1].set_ylabel("MFCC Coef")
-    ax[1].set_xlabel("Frame Index")
+    # im2 = ax[1].imshow(np.array(out).T, aspect='auto')
+    # # audio, sr = torchaudio.load("speech-data/go/0a2b400e_nohash_0.wav")
+    # # transform = torchaudio.transforms.MFCC(sample_rate=sr, n_mfcc=12,
+    #                                     #    melkwargs={"n_fft": 512, "hop_length": 400,
+    #                                                 #   "n_mels": 26})
+    # # out = transform(audio)
+    # # im2 = ax[1].imshow(out[0], aspect='auto')
+    # ax[1].set_ylabel("MFCC Coef")
+    # ax[1].set_xlabel("Frame Index")
 
-    fig.colorbar(im1, ax=ax[0])
-    fig.colorbar(im2, ax=ax[1])
-    plt.tight_layout()
-    # plt.show()
-    plt.savefig("out.png")
+    # fig.colorbar(im1, ax=ax[0])
+    # fig.colorbar(im2, ax=ax[1])
+    # plt.tight_layout()
+    # # plt.show()
+    # plt.savefig("out.png")
