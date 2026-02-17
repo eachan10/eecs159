@@ -8,11 +8,12 @@ import numpy as np
 from test import MathNet
 
 if __name__ == "__main__":
-    net = nn.ConvNet()
+    net = nn.ConvNetStopGo()
     # net.load_state_dict(torch.load("out/model_iter0.pth", weights_only=True))
     if True:
         quant.prepare_qat(net, inplace=True)
-        net.load_state_dict(torch.load("out-cnn-32-64-128-fc1/model_iter9.pth", weights_only=True))
+        net.load_state_dict(torch.load("out-conv-stop-go/model_iter8.pth", weights_only=True))
+        nn.fuse_module(net)
         nn.quantize(net)
         net.eval()
     else:
@@ -46,16 +47,18 @@ if __name__ == "__main__":
             with torch.no_grad():
                 out = net(features)
                 # out = math_net(features)
-                pred = torch.sigmoid(out).item()
-            if pred > 0.5:    # PARAM: threshold for sigmoid function - decrease makes more likely to be positive
+                prob = torch.softmax(out,dim=1)
+                pred = torch.argmax(prob, dim=1).item()
+            threshold = [2, 0, 0.8]
+            if prob[0][pred] > threshold[pred]:    # PARAM: threshold for sigmoid function - decrease makes more likely to be positive
                 pred_count += 1
             else:
                 pred_count = 0
-            if pred_count > 1: # PARAM: number of consecutive positives needed to detect for actual positive
-                if last == False:
-                    print("\rDETECTED           ", end='')
-                    last = True
+            if pred_count >= 1: # PARAM: number of consecutive positives needed to detect for actual positive
+                if last == 0:
+                    print(f"\rDETECTED {pred}                              ", end='')
+                    last = pred
                     timestamp = time()
             elif time() - 1 > timestamp:
-                print(f"\r{out.item():.3f} {pred*100:.2f}%     ", end='')
-                last = False
+                print(f"\r{prob[0][0].item():.2f} {prob[0][1].item():.2f} {prob[0][2].item():.2f} {pred}     ", end='')
+                last = 0
