@@ -13,7 +13,7 @@ import tqdm
 
 
 from audio_preprocessor import *
-from data import INPUT_SIZE
+from config import *
 
 BATCH_SIZE = 64
 

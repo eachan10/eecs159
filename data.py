@@ -11,16 +11,10 @@ from torch.utils.data import IterableDataset, Dataset
 
 from audio_preprocessor import *
 from augment_data import *
+from config import *
 
 if sys.platform == "win32":
     os.add_dll_directory(r"C:\Users\eacha\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Shared_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-7.1.1-full_build-shared\bin")
-
-SAMPLE_FREQ = 16000
-COEF_PER_FRAME = 12
-FRAME_LENGTH = 400
-FRAME_STEP = 300
-FRAMES_PER_SEC = len(range(0, SAMPLE_FREQ - FRAME_LENGTH, FRAME_STEP)) # 40
-INPUT_SIZE = COEF_PER_FRAME * FRAMES_PER_SEC
 
 with open("token.txt") as f:
     token = f.read()
