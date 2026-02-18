@@ -9,6 +9,7 @@ import numpy as np
 if __name__ == "__main__":
 
     # Load trained model and quantize for inference
+    torch.backends.quantized.engine = 'qnnpack'
     net = nn.ConvNetStopGo()
     quant.prepare_qat(net, inplace=True)
     # net.load_state_dict(torch.load("out-cnn-32-64-128-fc1/model_iter9.pth", weights_only=True))
