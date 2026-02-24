@@ -5,6 +5,7 @@
 #include <time.h>
 #include "model_dump.h"
 #include "test_vec.h"
+#include "streamed.h"
 
 
 // inputs: x, x_scale, x_zero_point, weight, weight_scale, weight_zero_point
@@ -203,28 +204,34 @@ void forward_pass2(int32_t *x, int32_t *out) {
          13, 6, 64, 128, 3, 3, 1, 1, 0);
   relu(buf1, 13*6*128);
   avgpool2d(buf1, buf2, 128, 13, 6, 13, 6);
-  linear(buf2, fc1_weights, fc1_bias, buf1, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128, 1);
-  *out = buf1[0];
+  linear(buf2, fc1_weights, fc1_bias, buf1, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128, 3);
+  for (int i = 0; i < 3; i++) {
+    out[i] = buf1[i];
+  }
 }
 
 
 int main() {
-  int32_t out = 0;
+  int32_t out[3] = { 0 };
   // printf("Starting...\n");
-  clock_t begin, end;
-  double time_spent = 0.0;
-  for (int i = 0; i < 100; i++) {
-    begin = clock();
-    forward_pass2(x[i], &out);
-    end = clock();
-    time_spent += (double)(end - begin) / CLOCKS_PER_SEC;
-    // needs fc1 output scale
-    double outf = (double)out * 0.03421637415885925;
-    double threshold = 0.4;
-    double prob = 1 / (1 + exp(-outf));
-    printf("Out[%2d]: %4d Expected: %4d ", i, out, y[i]);
-    printf("Prob: %5.2f%% Pred: %d\n", prob * 100, prob > threshold ? 1 : 0);
+  int TESTING = 0;
+  if (TESTING) {
+    clock_t begin, end;
+    double time_spent = 0.0;
+    for (int i = 0; i < 100; i++) {
+      begin = clock();
+      forward_pass2(x[i], out);
+      end = clock();
+      time_spent += (double)(end - begin) / CLOCKS_PER_SEC;
+      printf("Out[%2d]: %4d %4d %4d Expected: %4d %4d %4d\n", i, out[0], out[1], out[2], y[i*3], y[i*3+1], y[i*3+2]);
+      // printf("Prob: %5.2f%% Pred: %d\n", prob * 100, prob > threshold ? 1 : 0);
+    }
+    printf("Average Time Per Inference: %.3fms\n", time_spent / 100.0 * 1000.0);
+  } else {
+    for (int i = 0; i < 4; i++) {
+      forward_pass2(&x_stream[i*10*12], out);
+      printf("Out: %4d %4d %4d\n", out[0], out[1], out[2]);
+    }
   }
-  printf("Average Time Per Inference: %.3fms\n", time_spent / 100.0 * 1000.0);
   return 0;
 }
