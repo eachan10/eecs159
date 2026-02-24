@@ -181,15 +181,17 @@ def dump_params(net: Net):
     fc4 = layer_params(fc3["output_scale"], net.fc4)
     return fc1, fc2, fc3, fc4
 
-def dump_params_array(params, prefix):
+def dump_params_array(params, prefix, transpose=False):
     all_str = []
     # weights 2d matrix
     w : torch.Tensor= params["weight"]
+    # weights from OC, IC, KH, KW
+    #           to IC, KH, KW, OC
+    if transpose:
+        w = torch.permute(w, (1, 2, 3, 0))
     w_str = f"int32_t {prefix}_weights[{w.numel()}] = {{\n"
     for idx, row in enumerate(w):
         count = 0
-        # w_str += "  {\n"
-        w_str += f"//////// Row {idx}  /////////\n"
         for col in row.flatten():
             if count == 0:
                 w_str += "    "

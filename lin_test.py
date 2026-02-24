@@ -1,5 +1,5 @@
 from test import *
-from nn import ConvNet
+from nn import ConvNetStopGo
 import torch.quantization as quant
 import numpy as np
 from data import WavDataset
@@ -58,9 +58,9 @@ def conv2d(inp, weight):
 
 
 if __name__ == "__main__":
-    net = ConvNet()
+    net = ConvNetStopGo()
     quant.prepare_qat(net, inplace=True)
-    net.load_state_dict(torch.load("out-cnn-32-64-128-fc1/model_iter9.pth"))
+    net.load_state_dict(torch.load("out-conv-stop-go/model_iter9.pth"))
     fuse_module(net)
     quantize(net)
     net.eval()
@@ -84,72 +84,52 @@ if __name__ == "__main__":
     x4 = net.flatten(x3)
     golden = net.fc1(x4)
 
-    conv1_params = layer_params(torch.tensor(net.quant.scale), net.conv1)
+    conv1_params = layer_params(net.quant.scale, net.conv1)
     conv2_params = layer_params(net.conv1.scale, net.conv2)
     conv3_params = layer_params(net.conv2.scale, net.conv3)
     fc1_params = layer_params(torch.tensor(x4.q_scale()), net.fc1)
-    fc1_params["weight"].detach().numpy().astype(np.int32).tofile("src/weights.bin")
 
-    print((golden.int_repr().to(torch.int32) - golden.q_zero_point()).flatten())
-    
-    def test(idx):
-        return quantized_linear_c(fc1_params, x4[idx:idx+1].int_repr() - x4.q_zero_point())
-    test_out =[]
-    for i in range(10):
-        test_out.append(test(i).item())
-    print(test_out)
-
-    golden_conv1 = net.conv1(xq).int_repr().to(torch.int32) - conv1_params["output_zero_point"]
-    out_conv1 = F.conv2d(xq[0:1].int_repr().to(torch.int32) - xq.q_zero_point(), conv1_params["weight"].to(torch.int32), padding=1)
-    for ch in range(out_conv1.size(1)):
-        out_conv1[:,ch] += conv1_params["bias"][ch]
-    out_conv1 *= conv1_params["acc_scale"]
-    out_conv1 >>= conv1_params["shift"]
-
-    # this removes the batch size dimension from input tensor
-    # input is (1, 52, 12) in channel, rows, cols
-    # weights is (16, 1, 52, 12) out channel, in channel, rows, cols
-    out_conv1a = conv2d(xq[0].int_repr().to(torch.int32) - xq.q_zero_point(), conv1_params["weight"].to(torch.int32))
-    for ch in range(out_conv1a.size(0)):
-        out_conv1a[ch] += conv1_params["bias"][ch]
-    out_conv1a *= conv1_params["acc_scale"]
-    out_conv1a >>= conv1_params["shift"]
-
-    out_maxpool1 = net.pool1(net.relu1(net.bn1(net.conv1(xq))))
-    golden_pool1 = out_maxpool1.int_repr().to(torch.int32) - out_maxpool1.q_zero_point()
-    # out_conv1 += conv1_params["output_zero_point"]
-    print("Golden")
-    print(golden_conv1[0,0,0])
-    print("Torch functional conv2d")
-    print(out_conv1[0,0,0])
-    print("Manaul conv2d")
-    print(out_conv1a[0,0])
     with open("src/model_dump.h", "w") as f:
-        f.write(dump_params_array(conv1_params, "conv1"))
-        f.write(dump_params_array(conv2_params, "conv2"))
-        f.write(dump_params_array(conv3_params, "conv3"))
+        f.write(f"int32_t input_zero_point = {net.quant.zero_point.item()};\n")
+        f.write(dump_params_array(conv1_params, "conv1", transpose=True))
+        f.write("\n")
+        f.write(dump_params_array(conv2_params, "conv2", transpose=True))
+        f.write("\n")
+        f.write(dump_params_array(conv3_params, "conv3", transpose=True))
+        f.write("\n")
         f.write(dump_params_array(fc1_params, "fc1"))
+        f.write("\n")
+        pool_scale = round(1/(net.pool3.kernel_size[0]*net.pool3.kernel_size[1])*(1<<25))
+        f.write(f"int32_t avgpool_acc_scale = {pool_scale};\n")
+        f.write("int32_t avgpool_shift = 25;\n")
 
-    with open("src/test_vec.h", "w") as f:
-        # test_x = x4.int_repr().to(torch.int32) - x4.q_zero_point()
-        test_x = xq.int_repr().to(torch.int32) - xq.q_zero_point()
-        f.write(f"int32_t x[{test_x.size(0)}][{test_x.numel()//test_x.size(0)}] = {{\n")
-        for row in test_x:
-            count = 0
-            f.write("  {\n")
-            for col in row.flatten():
-                if count == 0:
-                    f.write("    ")
-                f.write(f"{col.item():5}, ")
-                if count == 15:
-                    f.write("\n")
-                    count = 0
-                else:
-                    count += 1
-            f.write("\n  },\n")
-        f.write("\n};\n")
-        test_y = golden.int_repr().to(torch.int32) - net.fc1.zero_point
-        f.write(f"int32_t y[{test_y.numel()}] = {{")
-        for col in test_y:
-            f.write(f"{col.item():6}, ")
-        f.write("};\n")
+    # with open("src/test_vec.h", "w") as f:
+    #     # test_x = x4.int_repr().to(torch.int32) - x4.q_zero_point()
+    #     test_x = xq.int_repr().to(torch.int32) - xq.q_zero_point()
+    #     f.write(f"int32_t x[{test_x.size(0)}][{test_x.numel()//test_x.size(0)}] = {{\n")
+    #     for row in test_x:
+    #         count = 0
+    #         f.write("  {\n")
+    #         for col in row.flatten():
+    #             if count == 0:
+    #                 f.write("    ")
+    #             f.write(f"{col.item():5}, ")
+    #             if count == 15:
+    #                 f.write("\n")
+    #                 count = 0
+    #             else:
+    #                 count += 1
+    #         f.write("\n  },\n")
+    #     f.write("\n};\n")
+    #     test_y = golden.int_repr().to(torch.int32) - net.fc1.zero_point
+    #     f.write(f"int32_t y[{test_y.numel()}] = {{\n    ")
+    #     for col in test_y.flatten():
+    #         if count == 0:
+    #             f.write("    ")
+    #         f.write(f"{col.item():5}, ")
+    #         if count == 15:
+    #             f.write("\n")
+    #             count = 0
+    #         else:
+    #             count += 1
+    #     f.write("};\n")

@@ -97,7 +97,7 @@ void conv2d_vec(int32_t *x, int32_t *w, int32_t *b, int32_t *out,
 
                 int input_val = x[IDX_CONV(in_r, in_c, ic, in_w, in_channels)];
                 if (IDX_CONV(in_r, in_c, ic, in_w, in_channels) == 0) {
-                  printf("\nin0: %d\n", x[0]);
+                  // printf("\nin0: %d\n", x[0]);
                 }
 
                 for (int kr = 0; kr < kernel_h; kr++) {
@@ -928,64 +928,49 @@ int main() {
   int32_t buf2[20000];
   int32_t buf3[20000];
 
-  // Scalar CNN
-  conv2d(x[0], conv1_weights, conv1_bias, buf1,
-         conv1_acc_scale, conv1_shift, conv1_output_zero_point,
-         52, 12, 1, 32, 3, 3, 1, 1, 0);
-  relu(buf1, 52*12*32);
-  maxpool2d(buf1, buf2, 32, 52, 12, 2, 1);
-  conv2d(buf2, conv2_weights, conv2_bias, buf1,
-         conv2_acc_scale, conv2_shift, conv2_output_zero_point,
-         26, 12, 32, 64, 3, 3, 1, 1, 0);
-  relu(buf1, 26*12*64);
-  maxpool2d(buf1, buf2, 64, 26, 12, 2, 2);
-  conv2d(buf2, conv3_weights, conv3_bias, buf1,
-         conv3_acc_scale, conv3_shift, conv3_output_zero_point,
-         13, 6, 64, 128, 3, 3, 1, 1, 0);
-  relu(buf1, 13*6*128);
-  avgpool2d(buf1, buf2, 128, 13, 6, 13, 6);
-  linear(buf2, fc1_weights, fc1_bias, buf1, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128, 1);
+  // // Scalar CNN
+  // conv2d(x[0], conv1_weights, conv1_bias, buf1,
+  //        conv1_acc_scale, conv1_shift, conv1_output_zero_point,
+  //        52, 12, 1, 32, 3, 3, 1, 1, 0);
+  // relu(buf1, 52*12*32);
+  // maxpool2d(buf1, buf2, 32, 52, 12, 2, 1);
+  // conv2d(buf2, conv2_weights, conv2_bias, buf1,
+  //        conv2_acc_scale, conv2_shift, conv2_output_zero_point,
+  //        26, 12, 32, 64, 3, 3, 1, 1, 0);
+  // relu(buf1, 26*12*64);
+  // maxpool2d(buf1, buf2, 64, 26, 12, 2, 2);
+  // conv2d(buf2, conv3_weights, conv3_bias, buf1,
+  //        conv3_acc_scale, conv3_shift, conv3_output_zero_point,
+  //        13, 6, 64, 128, 3, 3, 1, 1, 0);
+  // relu(buf1, 13*6*128);
+  // avgpool2d(buf1, buf2, 128, 13, 6, 13, 6);
+  // linear(buf2, fc1_weights, fc1_bias, buf1, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128, 3);
 
   // Pseudo-Vectorized CNN
-  conv2d_vec(x[0], conv1_weights_vec, conv1_bias, buf2,
-             conv1_acc_scale, conv1_shift, conv1_output_zero_point,
-             52, 12, 1, 32, 3, 3, 1);
-  relu(buf2, 52*12*32);
-  maxpool2d_vec(buf2, buf3, 32, 52, 12, 2, 1);
-  conv2d_vec(buf3, conv2_weights_vec, conv2_bias, buf2,
-             conv2_acc_scale, conv2_shift, conv2_output_zero_point,
-             26, 12, 32, 64, 3, 3, 1);
-  relu(buf2, 26*12*64);
-  maxpool2d_vec(buf2, buf3, 64, 26, 12, 2, 2);
-  conv2d_vec(buf3, conv3_weights_vec, conv3_bias, buf2,
-             conv3_acc_scale, conv3_shift, conv3_output_zero_point,
-             13, 6, 64, 128, 3, 3, 1);
-  relu(buf2, 13*6*128);
-  avgpool2d_vec(buf2, buf3, avgpool_acc_scale, avgpool_shift,
-                128, 13, 6, 13, 6);
-  linear_to_one(buf3, fc1_weights, fc1_bias_scalar, buf2, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128);
+  for (int i = 0; i < 100; i++) {
+    conv2d_vec(x[i], conv1_weights, conv1_bias, buf2,
+              conv1_acc_scale, conv1_shift, conv1_output_zero_point,
+              52, 12, 1, 32, 3, 3, 1);
+    relu(buf2, 52*12*32);
+    maxpool2d_vec(buf2, buf3, 32, 52, 12, 2, 1);
+    conv2d_vec(buf3, conv2_weights, conv2_bias, buf2,
+              conv2_acc_scale, conv2_shift, conv2_output_zero_point,
+              26, 12, 32, 64, 3, 3, 1);
+    relu(buf2, 26*12*64);
+    maxpool2d_vec(buf2, buf3, 64, 26, 12, 2, 2);
+    conv2d_vec(buf3, conv3_weights, conv3_bias, buf2,
+              conv3_acc_scale, conv3_shift, conv3_output_zero_point,
+              13, 6, 64, 128, 3, 3, 1);
+    relu(buf2, 13*6*128);
+    avgpool2d_vec(buf2, buf3, avgpool_acc_scale, avgpool_shift,
+                  128, 13, 6, 13, 6);
+    linear_to_one(buf3, fc1_weights, fc1_bias[0], buf2, fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128);
+    linear_to_one(buf3, &fc1_weights[128], fc1_bias[1], &buf2[1], fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128);
+    linear_to_one(buf3, &fc1_weights[128*2], fc1_bias[2], &buf2[2], fc1_acc_scale, fc1_shift, fc1_output_zero_point, 128);
 
-  int OH = 1;
-  int OW = 1;
-  int OC = 1;
+    printf("Golden: %d %d %d ", y[i*3], y[i*3+1], y[i*3+2]);
+    printf("Vec: %d %d %d\n", buf2[0], buf2[1], buf2[2]);
 
-  int errors = 0;
-
-  if (buf2[0] != buf1[0]) {
-      printf("Mismatch!\n");
-      printf("New: %d\n", buf2[0]);
-      printf("Old: %d\n", buf1[0]);
-      errors++;
   }
-
-  if (errors == 0)
-      printf("Outputs match!\n");
-  else
-      printf("Total mismatches: %d\n", errors);
-
-  printf("\nint32_t y = {");
-  printf("%d", buf2[0]);
-  printf("};\n");
-
   return 0;
 }
