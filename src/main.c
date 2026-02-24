@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
-#include "model_dump.h"
+#include "model_dump_not_t.h"
 #include "test_vec.h"
 #include "streamed.h"
 
@@ -210,6 +210,11 @@ void forward_pass2(int32_t *x, int32_t *out) {
   }
 }
 
+float dequant(int32_t n) {
+  float out = (float)n;
+  out = out * out_s;
+  return out;
+}
 
 int main() {
   int32_t out[3] = { 0 };
@@ -228,9 +233,14 @@ int main() {
     }
     printf("Average Time Per Inference: %.3fms\n", time_spent / 100.0 * 1000.0);
   } else {
+    int num = 3;
+    for (int i = 0; i < 624 + 10*12*num; i++) {
+      x_stream[i] -= input_zero_point;
+    }
     for (int i = 0; i < 4; i++) {
       forward_pass2(&x_stream[i*10*12], out);
-      printf("Out: %4d %4d %4d\n", out[0], out[1], out[2]);
+      printf("Out: %4d %4d %4d ", out[0], out[1], out[2]);
+      printf("Outf: %f %f %f\n", dequant(out[0]), dequant(out[1]), dequant(out[2]));
     }
   }
   return 0;
